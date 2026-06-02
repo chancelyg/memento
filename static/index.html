@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="memento — 个人海报墙，珍藏喜爱的游戏、图书与电影。" />
+  <title>memento · 我的收藏</title>
+  <link rel="stylesheet" href="/static/styles.css" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🗂️</text></svg>" />
+</head>
+<body>
+  <!-- Top bar -->
+  <header class="topbar" role="banner">
+    <div class="topbar__inner">
+      <a class="brand" href="/" aria-label="memento 首页">
+        <span class="brand__mark">◆</span>
+        <span class="brand__name">memento</span>
+      </a>
+      <button id="themeToggle" class="theme-toggle" type="button"
+              aria-label="切换浅色 / 深色主题" title="切换主题">
+        <span class="theme-toggle__icon" aria-hidden="true">🌙</span>
+      </button>
+    </div>
+  </header>
+
+  <main class="container" role="main">
+    <!-- Hero -->
+    <section class="hero">
+      <h1 class="hero__title">我的收藏</h1>
+      <p class="hero__subtitle">所有的美好都值得被珍藏与分享。</p>
+    </section>
+
+    <!-- Controls: filter pills + search -->
+    <section class="controls" aria-label="筛选与搜索">
+      <div class="pills" role="tablist" aria-label="类型筛选">
+        <button class="pill is-active" role="tab" aria-selected="true" data-type="all">全部</button>
+        <button class="pill" role="tab" aria-selected="false" data-type="game"><span aria-hidden="true">🎮</span> 游戏</button>
+        <button class="pill" role="tab" aria-selected="false" data-type="book"><span aria-hidden="true">📚</span> 图书</button>
+        <button class="pill" role="tab" aria-selected="false" data-type="movie"><span aria-hidden="true">🎬</span> 电影</button>
+      </div>
+      <div class="search">
+        <span class="search__icon" aria-hidden="true">🔍</span>
+        <input id="searchInput" class="search__input" type="search"
+               placeholder="搜索收藏…" autocomplete="off"
+               aria-label="按名称搜索收藏" />
+      </div>
+    </section>
+
+    <!-- Count line -->
+    <p id="countLine" class="count-line" aria-live="polite"></p>
+
+    <!-- Grid -->
+    <section id="grid" class="grid" aria-label="收藏海报墙" aria-busy="false"></section>
+
+    <!-- Empty state -->
+    <div id="emptyState" class="empty" hidden>
+      <div class="empty__art" aria-hidden="true">🗃️</div>
+      <p class="empty__text">还没有收藏，快通过 API 添加吧～</p>
+    </div>
+
+    <!-- Load more -->
+    <div class="loadmore-wrap">
+      <button id="loadMore" class="loadmore" type="button" hidden>加载更多收藏…</button>
+    </div>
+  </main>
+
+  <!-- Detail modal -->
+  <div id="modal" class="modal" hidden role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+    <div class="modal__backdrop" data-close></div>
+    <div class="modal__panel" role="document">
+      <button class="modal__close" type="button" aria-label="关闭" data-close>✕</button>
+      <div class="modal__body">
+        <div class="modal__poster">
+          <img id="modalImg" class="modal__img" alt="" />
+        </div>
+        <div class="modal__info">
+          <span id="modalBadge" class="badge"></span>
+          <h2 id="modalTitle" class="modal__title"></h2>
+          <p id="modalAka" class="modal__aka"></p>
+          <p id="modalSummary" class="modal__summary"></p>
+          <dl id="modalFields" class="fields"></dl>
+          <a id="modalLink" class="source-btn" target="_blank" rel="noopener" hidden>前往源页面 ↗</a>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast -->
+  <div id="toast" class="toast" role="alert" hidden></div>
+
+  <script src="/static/app.js" defer></script>
+</body>
+</html>

@@ -1,0 +1,38 @@
+[package]
+name = "memento"
+version = "0.1.0"
+edition = "2021"
+description = "A personal poster wall (海报墙) for favorite movies, games and books — single-binary Rust web app."
+license = "MIT"
+
+[[bin]]
+name = "memento"
+path = "src/main.rs"
+
+[dependencies]
+axum = { version = "0.8", features = ["multipart"] }
+tokio = { version = "1", features = ["full"] }
+tower = "0.5"
+tower-http = { version = "0.6", features = ["cors", "trace", "set-header"] }
+rusqlite = { version = "0.32", features = ["bundled"] }
+r2d2 = "0.8"
+r2d2_sqlite = "0.25"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+rust-embed = "8"
+mime_guess = "2"
+base64 = "0.22"
+chrono = { version = "0.4", features = ["serde", "clock"] }
+thiserror = "1"
+reqwest = { version = "0.12", features = ["blocking", "rustls-tls"], default-features = false }
+rand = "0.8"
+subtle = "2"
+url = "2"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+strip = true
