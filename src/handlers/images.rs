@@ -17,10 +17,7 @@ use crate::state::AppState;
 const IMAGE_CACHE_CONTROL: &str = "public, max-age=86400";
 
 /// `GET /api/favorites/{id}/image` — raw bytes (public).
-pub async fn get_image(
-    State(state): State<AppState>,
-    Path(id): Path<i64>,
-) -> AppResult<Response> {
+pub async fn get_image(State(state): State<AppState>, Path(id): Path<i64>) -> AppResult<Response> {
     let pool = state.pool.clone();
     let result = tokio::task::spawn_blocking(move || {
         let conn = pool.get().map_err(AppError::from)?;
@@ -82,7 +79,10 @@ pub async fn put_image(
     })
     .await??;
 
-    let dto = row.as_ref().map(FavoriteDto::from).ok_or(AppError::NotFound)?;
+    let dto = row
+        .as_ref()
+        .map(FavoriteDto::from)
+        .ok_or(AppError::NotFound)?;
     Ok((StatusCode::OK, Json(ApiResponse::ok(dto))).into_response())
 }
 
@@ -126,7 +126,11 @@ async fn read_raw_body_image(
     let declared = if content_type.is_empty() {
         ""
     } else {
-        content_type.split(';').next().unwrap_or(content_type).trim()
+        content_type
+            .split(';')
+            .next()
+            .unwrap_or(content_type)
+            .trim()
     };
 
     if !declared.is_empty() && !declared.starts_with("image/") {

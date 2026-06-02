@@ -145,3 +145,116 @@ impl From<tokio::task::JoinError> for AppError {
 
 /// Result alias used throughout the crate.
 pub type AppResult<T> = Result<T, AppError>;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use http_body_util::BodyExt;
+
+    fn boxed() -> anyhow_like::BoxError {
+        Box::new(std::io::Error::other("boom"))
+    }
+
+    #[test]
+    fn status_codes_map_correctly() {
+        assert_eq!(
+            AppError::BadRequest("x".into()).status(),
+            StatusCode::BAD_REQUEST
+        );
+        assert_eq!(AppError::Unauthorized.status(), StatusCode::UNAUTHORIZED);
+        assert_eq!(AppError::NotFound.status(), StatusCode::NOT_FOUND);
+        assert_eq!(
+            AppError::Database(boxed()).status(),
+            StatusCode::INTERNAL_SERVER_ERROR
+        );
+        assert_eq!(
+            AppError::ImageFetch(boxed()).status(),
+            StatusCode::INTERNAL_SERVER_ERROR
+        );
+        assert_eq!(
+            AppError::Internal(boxed()).status(),
+            StatusCode::INTERNAL_SERVER_ERROR
+        );
+    }
+
+    #[test]
+    fn public_message_never_leaks_internal_detail() {
+        // BadRequest passes the message through verbatim.
+        assert_eq!(
+            AppError::BadRequest("bad name".into()).public_message(),
+            "bad name"
+        );
+        // Internal/database/image errors yield generic text, not the source.
+        assert_eq!(
+            AppError::Unauthorized.public_message(),
+            "invalid or missing API key"
+        );
+        assert_eq!(AppError::NotFound.public_message(), "not found");
+        assert_eq!(
+            AppError::Database(boxed()).public_message(),
+            "a database error occurred"
+        );
+        assert_eq!(
+            AppError::ImageFetch(boxed()).public_message(),
+            "failed to fetch the remote image"
+        );
+        assert_eq!(
+            AppError::Internal(boxed()).public_message(),
+            "an internal error occurred"
+        );
+        // The internal "boom" detail must not appear anywhere user-facing.
+        assert!(!AppError::Database(boxed())
+            .public_message()
+            .contains("boom"));
+    }
+
+    #[tokio::test]
+    async fn into_response_sets_status_and_envelope() {
+        let resp = AppError::BadRequest("nope".into()).into_response();
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+        let bytes = resp.into_body().collect().await.unwrap().to_bytes();
+        let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(v["success"], serde_json::json!(false));
+        assert_eq!(v["data"], serde_json::Value::Null);
+        assert_eq!(v["error"], serde_json::json!("nope"));
+    }
+
+    #[tokio::test]
+    async fn into_response_logs_each_variant_without_panicking() {
+        // Drive every match arm in IntoResponse / logging.
+        for err in [
+            AppError::Unauthorized,
+            AppError::NotFound,
+            AppError::Database(boxed()),
+            AppError::ImageFetch(boxed()),
+            AppError::Internal(boxed()),
+        ] {
+            let _ = err.into_response();
+        }
+    }
+
+    #[test]
+    fn from_conversions_classify_sources() {
+        let sqlite_err: AppError = rusqlite::Error::QueryReturnedNoRows.into();
+        assert!(matches!(sqlite_err, AppError::Database(_)));
+
+        let json_err: AppError = serde_json::from_str::<i32>("not json").unwrap_err().into();
+        assert!(matches!(json_err, AppError::Internal(_)));
+    }
+
+    #[test]
+    fn ok_envelope_carries_data() {
+        let env = ApiResponse::ok(42);
+        assert!(env.success);
+        assert_eq!(env.data, Some(42));
+        assert!(env.error.is_none());
+    }
+
+    #[test]
+    fn error_envelope_helper_has_no_data() {
+        let env = error_envelope("oops");
+        assert!(!env.success);
+        assert!(env.data.is_none());
+        assert_eq!(env.error.as_deref(), Some("oops"));
+    }
+}

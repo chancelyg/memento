@@ -217,13 +217,16 @@ pub fn today_date() -> String {
     Utc::now().format("%Y-%m-%d").to_string()
 }
 
-/// Take a string field from the body, trimming; error if present but empty
-/// when `required` is set.
-fn take_string(body: &Map<String, Value>, key: &str) -> Option<String> {
+/// Take a string field from the body. A present `String` is returned as-is;
+/// absent or `Null` yields `None`; any other JSON type is rejected (no silent
+/// coercion of numbers/bools into strings).
+fn take_string(body: &Map<String, Value>, key: &str) -> AppResult<Option<String>> {
     match body.get(key) {
-        Some(Value::String(s)) => Some(s.clone()),
-        Some(Value::Null) | None => None,
-        Some(other) => Some(other.to_string()),
+        Some(Value::String(s)) => Ok(Some(s.clone())),
+        Some(Value::Null) | None => Ok(None),
+        Some(_) => Err(AppError::BadRequest(format!(
+            "field '{key}' must be a string"
+        ))),
     }
 }
 
@@ -231,7 +234,7 @@ fn take_string(body: &Map<String, Value>, key: &str) -> Option<String> {
 /// present (rejects `javascript:`/`data:` schemes — defence against stored XSS
 /// when the value is later used as a link `href`).
 fn take_url(body: &Map<String, Value>) -> AppResult<Option<String>> {
-    match take_string(body, "url").map(|s| s.trim().to_string()) {
+    match take_string(body, "url")?.map(|s| s.trim().to_string()) {
         Some(s) if s.is_empty() => Ok(None),
         Some(s) => {
             if s.starts_with("http://") || s.starts_with("https://") {
@@ -282,7 +285,9 @@ fn fold_extra(body: &Map<String, Value>) -> AppResult<Map<String, Value>> {
         None | Some(Value::Null) => Map::new(),
         Some(Value::Object(o)) => o.clone(),
         Some(_) => {
-            return Err(AppError::BadRequest("field 'extra' must be an object".into()));
+            return Err(AppError::BadRequest(
+                "field 'extra' must be an object".into(),
+            ));
         }
     };
 
@@ -311,16 +316,16 @@ fn parse_rating(body: &Map<String, Value>) -> AppResult<Option<f64>> {
             }
             Ok(Some(r))
         }
-        Some(_) => Err(AppError::BadRequest("field 'rating' must be a number".into())),
+        Some(_) => Err(AppError::BadRequest(
+            "field 'rating' must be a number".into(),
+        )),
     }
 }
 
 /// At most one image source may be supplied.
-fn extract_image_sources(
-    body: &Map<String, Value>,
-) -> AppResult<(Option<String>, Option<String>)> {
-    let image_base64 = take_string(body, "image_base64").filter(|s| !s.trim().is_empty());
-    let image_url = take_string(body, "image_url").filter(|s| !s.trim().is_empty());
+fn extract_image_sources(body: &Map<String, Value>) -> AppResult<(Option<String>, Option<String>)> {
+    let image_base64 = take_string(body, "image_base64")?.filter(|s| !s.trim().is_empty());
+    let image_url = take_string(body, "image_url")?.filter(|s| !s.trim().is_empty());
     if image_base64.is_some() && image_url.is_some() {
         return Err(AppError::BadRequest(
             "provide at most one of 'image_base64' or 'image_url'".into(),
@@ -337,7 +342,7 @@ impl PreparedCreate {
             _ => return Err(AppError::BadRequest("field 'type' is required".into())),
         };
 
-        let name = take_string(body, "name")
+        let name = take_string(body, "name")?
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty())
             .ok_or_else(|| AppError::BadRequest("field 'name' is required".into()))?;
@@ -345,7 +350,7 @@ impl PreparedCreate {
         let extra_map = fold_extra(body)?;
         let extra = serde_json::to_string(&Value::Object(extra_map))?;
 
-        let sort_date = take_string(body, "sort_date")
+        let sort_date = take_string(body, "sort_date")?
             .filter(|s| !s.trim().is_empty())
             .unwrap_or_else(today_date);
 
@@ -362,9 +367,9 @@ impl PreparedCreate {
             url: take_url(body)?,
             aka: normalise_aka(body)?,
             genres: normalise_genres(body)?,
-            release_date: take_string(body, "release_date").filter(|s| !s.trim().is_empty()),
+            release_date: take_string(body, "release_date")?.filter(|s| !s.trim().is_empty()),
             rating: parse_rating(body)?,
-            summary: take_string(body, "summary").filter(|s| !s.trim().is_empty()),
+            summary: take_string(body, "summary")?.filter(|s| !s.trim().is_empty()),
             extra,
             sort_date,
             image_base64,
@@ -391,7 +396,7 @@ impl PreparedUpdate {
         }
 
         if body.contains_key("name") {
-            let name = take_string(body, "name")
+            let name = take_string(body, "name")?
                 .map(|s| s.trim().to_string())
                 .filter(|s| !s.is_empty())
                 .ok_or_else(|| AppError::BadRequest("field 'name' must not be empty".into()))?;
@@ -409,23 +414,23 @@ impl PreparedUpdate {
         }
         if body.contains_key("release_date") {
             up.release_date =
-                Some(take_string(body, "release_date").filter(|s| !s.trim().is_empty()));
+                Some(take_string(body, "release_date")?.filter(|s| !s.trim().is_empty()));
         }
         if body.contains_key("rating") {
             up.rating = Some(parse_rating(body)?);
         }
         if body.contains_key("summary") {
-            up.summary = Some(take_string(body, "summary").filter(|s| !s.trim().is_empty()));
+            up.summary = Some(take_string(body, "summary")?.filter(|s| !s.trim().is_empty()));
         }
         if body.contains_key("sort_date") {
-            if let Some(sd) = take_string(body, "sort_date").filter(|s| !s.trim().is_empty()) {
+            if let Some(sd) = take_string(body, "sort_date")?.filter(|s| !s.trim().is_empty()) {
                 up.sort_date = Some(sd);
             }
         }
 
         // Build an extra-patch only if relevant keys are present.
-        let has_extra_keys = body.contains_key("extra")
-            || EXTRA_FIELD_KEYS.iter().any(|k| body.contains_key(*k));
+        let has_extra_keys =
+            body.contains_key("extra") || EXTRA_FIELD_KEYS.iter().any(|k| body.contains_key(*k));
         if has_extra_keys {
             let extra_map = fold_extra(body)?;
             up.extra = Some(serde_json::to_string(&Value::Object(extra_map))?);
@@ -452,5 +457,266 @@ impl PreparedUpdate {
             && self.sort_date.is_none()
             && self.image_base64.is_none()
             && self.image_url.is_none()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    /// Build a `Map<String, Value>` body from a JSON literal.
+    fn body(v: Value) -> Map<String, Value> {
+        v.as_object().unwrap().clone()
+    }
+
+    /// Assert that an `AppResult` is an `AppError::BadRequest`.
+    fn assert_bad_request<T: std::fmt::Debug>(res: AppResult<T>) {
+        match res {
+            Err(AppError::BadRequest(_)) => {}
+            other => panic!("expected BadRequest, got {other:?}"),
+        }
+    }
+
+    // ----- ItemType::parse -----------------------------------------------
+
+    #[test]
+    fn parse_game_variants() {
+        assert_eq!(ItemType::parse("game").unwrap(), ItemType::Game);
+        assert_eq!(ItemType::parse("游戏").unwrap(), ItemType::Game);
+    }
+
+    #[test]
+    fn parse_movie_variants() {
+        assert_eq!(ItemType::parse("movie").unwrap(), ItemType::Movie);
+        assert_eq!(ItemType::parse("电影").unwrap(), ItemType::Movie);
+    }
+
+    #[test]
+    fn parse_book_variants() {
+        assert_eq!(ItemType::parse("book").unwrap(), ItemType::Book);
+        assert_eq!(ItemType::parse("图书").unwrap(), ItemType::Book);
+    }
+
+    #[test]
+    fn parse_unknown_is_err() {
+        assert_bad_request(ItemType::parse("widget"));
+    }
+
+    // ----- ItemType::parse_filter ----------------------------------------
+
+    #[test]
+    fn parse_filter_none_empty_all_yields_no_filter() {
+        assert_eq!(ItemType::parse_filter(None).unwrap(), None);
+        assert_eq!(ItemType::parse_filter(Some("")).unwrap(), None);
+        assert_eq!(ItemType::parse_filter(Some("all")).unwrap(), None);
+        assert_eq!(ItemType::parse_filter(Some("全部")).unwrap(), None);
+    }
+
+    #[test]
+    fn parse_filter_specific_type() {
+        assert_eq!(
+            ItemType::parse_filter(Some("game")).unwrap(),
+            Some(ItemType::Game)
+        );
+    }
+
+    #[test]
+    fn parse_filter_bad_is_err() {
+        assert_bad_request(ItemType::parse_filter(Some("widget")));
+    }
+
+    // ----- PreparedCreate::from_body -------------------------------------
+
+    /// A minimal valid create body (type + name + one image source).
+    fn minimal_valid_create() -> Map<String, Value> {
+        body(json!({
+            "type": "game",
+            "name": "Hollow Knight",
+            "image_url": "https://example.com/hk.png"
+        }))
+    }
+
+    #[test]
+    fn create_minimal_valid_ok() {
+        let prepared = PreparedCreate::from_body(&minimal_valid_create()).unwrap();
+        assert_eq!(prepared.item_type, ItemType::Game);
+        assert_eq!(prepared.name, "Hollow Knight");
+        assert_eq!(
+            prepared.image_url.as_deref(),
+            Some("https://example.com/hk.png")
+        );
+        assert!(prepared.image_base64.is_none());
+    }
+
+    #[test]
+    fn create_missing_type_is_err() {
+        let b = body(json!({
+            "name": "Hollow Knight",
+            "image_url": "https://example.com/hk.png"
+        }));
+        assert_bad_request(PreparedCreate::from_body(&b));
+    }
+
+    #[test]
+    fn create_missing_name_is_err() {
+        let b = body(json!({
+            "type": "game",
+            "image_url": "https://example.com/hk.png"
+        }));
+        assert_bad_request(PreparedCreate::from_body(&b));
+    }
+
+    #[test]
+    fn create_missing_image_is_err() {
+        // New required-image rule: neither image_base64 nor image_url present.
+        let b = body(json!({
+            "type": "game",
+            "name": "Hollow Knight"
+        }));
+        assert_bad_request(PreparedCreate::from_body(&b));
+    }
+
+    #[test]
+    fn create_both_image_sources_is_err() {
+        let b = body(json!({
+            "type": "game",
+            "name": "Hollow Knight",
+            "image_base64": "AAAA",
+            "image_url": "https://example.com/hk.png"
+        }));
+        assert_bad_request(PreparedCreate::from_body(&b));
+    }
+
+    #[test]
+    fn create_rating_out_of_range_is_err() {
+        let b = body(json!({
+            "type": "game",
+            "name": "Hollow Knight",
+            "image_url": "https://example.com/hk.png",
+            "rating": 11
+        }));
+        assert_bad_request(PreparedCreate::from_body(&b));
+    }
+
+    #[test]
+    fn create_rating_in_range_ok() {
+        let b = body(json!({
+            "type": "game",
+            "name": "Hollow Knight",
+            "image_url": "https://example.com/hk.png",
+            "rating": 9.5
+        }));
+        let prepared = PreparedCreate::from_body(&b).unwrap();
+        assert_eq!(prepared.rating, Some(9.5));
+    }
+
+    #[test]
+    fn create_non_string_name_is_err() {
+        // Strict take_string: a JSON number is rejected, not coerced.
+        let b = body(json!({
+            "type": "game",
+            "name": 42,
+            "image_url": "https://example.com/hk.png"
+        }));
+        assert_bad_request(PreparedCreate::from_body(&b));
+    }
+
+    #[test]
+    fn create_non_http_url_is_err() {
+        let b = body(json!({
+            "type": "game",
+            "name": "Hollow Knight",
+            "image_url": "https://example.com/hk.png",
+            "url": "javascript:alert(1)"
+        }));
+        assert_bad_request(PreparedCreate::from_body(&b));
+    }
+
+    #[test]
+    fn create_folds_type_specific_fields_into_extra() {
+        let b = body(json!({
+            "type": "game",
+            "name": "Hollow Knight",
+            "image_url": "https://example.com/hk.png",
+            "developer": "Team Cherry",
+            "platforms": ["PC", "Switch"]
+        }));
+        let prepared = PreparedCreate::from_body(&b).unwrap();
+        assert!(
+            prepared.extra.contains("developer"),
+            "extra should fold developer: {}",
+            prepared.extra
+        );
+        assert!(
+            prepared.extra.contains("Team Cherry"),
+            "extra should contain developer value: {}",
+            prepared.extra
+        );
+        assert!(
+            prepared.extra.contains("platforms"),
+            "extra should fold platforms: {}",
+            prepared.extra
+        );
+    }
+
+    // ----- PreparedUpdate::from_body -------------------------------------
+
+    #[test]
+    fn update_empty_body_is_empty() {
+        let b = body(json!({}));
+        let up = PreparedUpdate::from_body(&b).unwrap();
+        assert!(up.is_empty());
+    }
+
+    #[test]
+    fn update_only_rating_is_not_empty() {
+        let b = body(json!({ "rating": 7 }));
+        let up = PreparedUpdate::from_body(&b).unwrap();
+        assert!(!up.is_empty());
+        assert_eq!(up.rating, Some(Some(7.0)));
+    }
+
+    #[test]
+    fn update_explicit_extra_key_merges() {
+        let b = body(json!({
+            "extra": { "edition": "Collector's" }
+        }));
+        let up = PreparedUpdate::from_body(&b).unwrap();
+        let patch = up.extra.expect("extra patch should be present");
+        assert!(
+            patch.contains("edition"),
+            "extra patch should contain the explicit key: {patch}"
+        );
+        assert!(
+            patch.contains("Collector's"),
+            "extra patch should contain the value: {patch}"
+        );
+    }
+
+    #[test]
+    fn update_non_string_name_is_err() {
+        let b = body(json!({ "name": 42 }));
+        assert_bad_request(PreparedUpdate::from_body(&b));
+    }
+
+    // ----- normalise_aka / normalise_genres ------------------------------
+
+    #[test]
+    fn normalise_aka_accepts_string_and_array() {
+        let s = normalise_aka(&body(json!({ "aka": "Alt Name" }))).unwrap();
+        assert_eq!(s.as_deref(), Some("\"Alt Name\""));
+
+        let a = normalise_aka(&body(json!({ "aka": ["A", "B"] }))).unwrap();
+        assert_eq!(a.as_deref(), Some("[\"A\",\"B\"]"));
+    }
+
+    #[test]
+    fn normalise_genres_string_becomes_single_element_array() {
+        let g = normalise_genres(&body(json!({ "genres": "Metroidvania" }))).unwrap();
+        assert_eq!(g.as_deref(), Some("[\"Metroidvania\"]"));
+
+        let arr = normalise_genres(&body(json!({ "genres": ["RPG", "Indie"] }))).unwrap();
+        assert_eq!(arr.as_deref(), Some("[\"RPG\",\"Indie\"]"));
     }
 }

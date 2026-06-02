@@ -28,17 +28,76 @@ pub async fn require_api_key(
         .and_then(|v| v.to_str().ok())
         .unwrap_or("");
 
-    // Audited constant-time comparison (`subtle`). `ct_eq` returns false for
-    // differing lengths without an input-length-dependent loop, so the secret
-    // length is not leaked via a timing oracle.
+    // Constant-time comparison (`subtle`). For equal-length inputs `ct_eq`
+    // compares all bytes in constant time, revealing no per-byte timing
+    // signal; on a length mismatch it short-circuits and returns false. Since
+    // the configured key is a fixed-length hex string, the length is not
+    // secret and no useful timing oracle leaks.
     use subtle::ConstantTimeEq;
-    let matches: bool = provided
-        .as_bytes()
-        .ct_eq(state.api_key.as_bytes())
-        .into();
+    let matches: bool = provided.as_bytes().ct_eq(state.api_key.as_bytes()).into();
     if provided.is_empty() || !matches {
         return Err(AppError::Unauthorized);
     }
 
     Ok(next.run(request).await)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use axum::{
+        body::Body,
+        http::{Request as HttpRequest, StatusCode},
+        middleware::from_fn_with_state,
+        routing::get,
+        Router,
+    };
+    use tower::ServiceExt; // for `oneshot`
+
+    use crate::db::build_pool;
+
+    /// Build a minimal router guarded by `require_api_key` with key "secret".
+    fn guarded_router() -> Router {
+        // In-memory SQLite pool keeps the test self-contained and fast.
+        let pool = build_pool(":memory:").expect("build in-memory pool");
+        let state = AppState::new(pool, "secret".into());
+
+        Router::new()
+            .route("/t", get(|| async { "ok" }))
+            .layer(from_fn_with_state(state, require_api_key))
+    }
+
+    /// Issue a GET /t request with an optional `X-API-Key` header value.
+    async fn request_with_key(key: Option<&str>) -> StatusCode {
+        let mut builder = HttpRequest::builder().uri("/t");
+        if let Some(value) = key {
+            builder = builder.header(API_KEY_HEADER, value);
+        }
+        let request = builder.body(Body::empty()).expect("build request");
+
+        guarded_router()
+            .oneshot(request)
+            .await
+            .expect("router oneshot")
+            .status()
+    }
+
+    #[tokio::test]
+    async fn missing_api_key_is_unauthorized() {
+        assert_eq!(request_with_key(None).await, StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn wrong_api_key_is_unauthorized() {
+        assert_eq!(
+            request_with_key(Some("wrong")).await,
+            StatusCode::UNAUTHORIZED
+        );
+    }
+
+    #[tokio::test]
+    async fn correct_api_key_passes_through() {
+        assert_eq!(request_with_key(Some("secret")).await, StatusCode::OK);
+    }
 }

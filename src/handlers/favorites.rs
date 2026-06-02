@@ -7,13 +7,12 @@ use axum::{
     Json,
 };
 use serde::{Deserialize, Serialize};
+#[cfg(test)]
 use serde_json::{Map, Value};
 
 use crate::error::{ApiResponse, AppError, AppResult};
 use crate::image::{decode_base64_image, fetch_image_blocking, DecodedImage};
-use crate::models::{
-    FavoriteDto, ItemType, PreparedCreate, PreparedUpdate, RawPayload,
-};
+use crate::models::{FavoriteDto, ItemType, PreparedCreate, PreparedUpdate, RawPayload};
 use crate::repo::{self, ListQuery};
 use crate::state::AppState;
 
@@ -113,11 +112,11 @@ async fn resolve_image(
     image_url: Option<String>,
 ) -> AppResult<Option<DecodedImage>> {
     if let Some(b64) = image_base64 {
-        return Ok(Some(decode_base64_image(&b64)?));
+        let decoded = tokio::task::spawn_blocking(move || decode_base64_image(&b64)).await??;
+        return Ok(Some(decoded));
     }
     if let Some(url) = image_url {
-        let decoded =
-            tokio::task::spawn_blocking(move || fetch_image_blocking(&url)).await??;
+        let decoded = tokio::task::spawn_blocking(move || fetch_image_blocking(&url)).await??;
         return Ok(Some(decoded));
     }
     Ok(None)
@@ -129,11 +128,7 @@ pub async fn create_favorite(
     Json(RawPayload(body)): Json<RawPayload>,
 ) -> AppResult<Response> {
     let prepared = PreparedCreate::from_body(&body)?;
-    let image = resolve_image(
-        prepared.image_base64.clone(),
-        prepared.image_url.clone(),
-    )
-    .await?;
+    let image = resolve_image(prepared.image_base64.clone(), prepared.image_url.clone()).await?;
 
     let pool = state.pool.clone();
     let new_id = tokio::task::spawn_blocking(move || {
@@ -157,16 +152,12 @@ pub async fn update_favorite(
         return Err(AppError::BadRequest("no updatable fields supplied".into()));
     }
 
-    let image = resolve_image(
-        prepared.image_base64.clone(),
-        prepared.image_url.clone(),
-    )
-    .await?;
+    let image = resolve_image(prepared.image_base64.clone(), prepared.image_url.clone()).await?;
 
     let pool = state.pool.clone();
     let updated = tokio::task::spawn_blocking(move || {
-        let conn = pool.get().map_err(AppError::from)?;
-        repo::update(&conn, id, &prepared, image.as_ref())
+        let mut conn = pool.get().map_err(AppError::from)?;
+        repo::update(&mut conn, id, &prepared, image.as_ref())
     })
     .await??;
 
@@ -216,7 +207,7 @@ async fn fetch_dto(state: &AppState, id: i64) -> AppResult<FavoriteDto> {
 }
 
 /// Helper exposed for tests / introspection: validate a body without writing.
-#[allow(dead_code)]
+#[cfg(test)]
 pub fn validate_create(body: &Map<String, Value>) -> AppResult<PreparedCreate> {
     PreparedCreate::from_body(body)
 }
