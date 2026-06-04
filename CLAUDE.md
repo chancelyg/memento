@@ -20,7 +20,7 @@ cargo clippy --all-targets        # lint
 cargo fmt                         # format
 ```
 
-Config is read **directly from the process environment** — there is no `.env` autoloading in the Rust code (no `dotenv` dependency). The `.env` / `.env.example` files are for the operator to `source`/`export` manually or for the Python scripts. Variables: `MEMENTO_API_KEY` (write auth; if unset a random ephemeral key is generated and logged **once** at WARN), `MEMENTO_DB_PATH` (default `./memento.db`), `MEMENTO_BIND` (default `0.0.0.0:23457`), `RUST_LOG` (default `info`).
+Config is read from the process environment, and the binary **auto-loads a `.env`** from the working directory at startup (`dotenvy::dotenv()` in `main.rs`, before tracing/config; existing env vars win, missing file is OK). Variables: `MEMENTO_API_KEY` (write auth; if unset a random ephemeral key is generated and logged **once** at WARN), `MEMENTO_DB_PATH` (default `./memento.db`), `MEMENTO_BIND` (default `0.0.0.0:23457`), `RUST_LOG` (default `info`); plus operator-customisable site display strings `MEMENTO_SITE_NAME` / `MEMENTO_SLOGAN` / `MEMENTO_ICON` (in `config::SiteConfig`, each with a built-in default), injected into `index.html` at serve time by `assets::index_handler` (string-replacing `{{SITE_NAME}}`/`{{SLOGAN}}`/`{{ICON}}` placeholders, HTML-escaped).
 
 ```bash
 # Seed importer — backfills from the OLD 海报墙 site's API (urllib, stdlib only)
@@ -41,7 +41,7 @@ main.rs (router, layers)
             └─ db.rs (pool + idempotent schema)
 ```
 
-- **`main.rs`** splits routes into a public `Router` and a `guarded` `Router` (write routes wrapped in `auth::require_api_key` + a 20 MiB body limit). Security headers (`nosniff`, `X-Frame-Options: DENY`, `no-referrer`) and permissive CORS are applied app-wide.
+- **`lib.rs`** (`build_router`; `main.rs` is a thin shim calling `memento::run`) splits routes into a public `Router` and a `guarded` `Router` (write routes + `GET /api/auth/verify` wrapped in `auth::require_api_key` + a 20 MiB body limit). `GET /api/auth/verify` is a key-check endpoint: reaching the handler means the key was valid (returns `{valid:true}`); a bad/missing key is rejected upstream with 401. Security headers (`nosniff`, `X-Frame-Options: DENY`, `no-referrer`) and permissive CORS are applied app-wide. The crate has both a `[lib]` and `[[bin]]` target (same name) so integration tests can drive `build_router`.
 - **Blocking DB work** (`rusqlite` is sync) is always run inside `tokio::task::spawn_blocking`. Handlers `.clone()` `state.pool` into the closure. Keep this pattern — never call `repo::*` directly on the async runtime.
 - **`repo.rs`** functions take a `&Connection` and are pure data access (no HTTP types). Dynamic `WHERE`/`SET` clauses use parameterized binds (`Box<dyn ToSql>`) — never string-interpolate user values into SQL. LIKE search escapes `%`/`_` via `escape_like`.
 - **`error.rs`** is the single error type. `AppError` maps each variant to an HTTP status and a **sanitized public message**; full detail is logged server-side only. Every endpoint returns the `ApiResponse { success, data, error }` envelope (errors use `error_envelope`).

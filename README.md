@@ -1,7 +1,5 @@
 # memento
 
-[![CI](https://github.com/chancelyg/memento/actions/workflows/ci.yml/badge.svg)](https://github.com/chancelyg/memento/actions/workflows/ci.yml)
-
 电影 / 游戏 / 图书三合一的个人海报墙。一个 Rust 单文件二进制 Web 应用：数据和前端都打包进可执行文件，读取公开、写入用 API Key 鉴权。
 
 数据存在本地 SQLite 文件里（含海报图片本身），前端静态资源在编译期内嵌进二进制，所以部署只需要拷贝一个文件。新增、修改收藏都通过 HTTP API 完成，方便由脚本、Telegram 机器人或 agent 提交。
@@ -26,11 +24,11 @@ export MEMENTO_API_KEY="$(openssl rand -hex 24)"   # 写接口鉴权 key
 ./memento
 ```
 
-启动后访问 `http://<host>:23457/`。若未设置 `MEMENTO_API_KEY`，程序会生成一个临时随机 key 并在启动日志中以 WARN 打印一次（`generated ephemeral API key: ...`）——仅适合本地试用，生产环境务必显式设置。
+启动后访问 `http://<host>:23457/`。也可以把配置写进二进制同目录下的 `.env` 文件，启动时会自动加载（无需手动 `source`）。若未设置 `MEMENTO_API_KEY`，程序会生成一个临时随机 key 并在启动日志中以 WARN 打印一次（`generated ephemeral API key: ...`）——仅适合本地试用，生产环境务必显式设置。
 
 ### 配置
 
-全部通过环境变量配置，程序不会自动读取 `.env` 文件（`.env.example` 仅供你手动复制并 `source`/`export`）。
+通过环境变量配置。程序启动时会**自动读取工作目录下的 `.env` 文件**（已存在的环境变量优先，缺少 `.env` 不报错）；也可以直接 `export`。可复制 `.env.example` 起步。
 
 | 变量 | 默认值 | 说明 |
 |---|---|---|
@@ -38,6 +36,9 @@ export MEMENTO_API_KEY="$(openssl rand -hex 24)"   # 写接口鉴权 key
 | `MEMENTO_DB_PATH` | `./memento.db` | SQLite 文件路径。 |
 | `MEMENTO_BIND` | `0.0.0.0:23457` | 监听地址。 |
 | `RUST_LOG` | `info` | tracing 日志过滤器，例如 `memento=debug,tower_http=debug`。 |
+| `MEMENTO_SITE_NAME` | `memento` | 站点名称，用于页面标题与左上角品牌名。 |
+| `MEMENTO_SLOGAN` | `所有的美好都值得被珍藏与分享。` | 首页副标题（slogan）。 |
+| `MEMENTO_ICON` | 内置 🗂️ emoji SVG | favicon，可填 URL 或 data URI。 |
 
 ```bash
 export MEMENTO_API_KEY="$(openssl rand -hex 24)"
@@ -106,10 +107,19 @@ export MEMENTO_BIND=0.0.0.0:23457
 
 | 方法与路径 | 说明 | 成功响应 |
 |---|---|---|
+| `GET /api/auth/verify` | 校验 `X-API-Key` 是否正确 | `200` + `{ "valid": true }` |
 | `POST /api/favorites` | 创建一条收藏 | `201` + `FavoriteDto` |
 | `PUT /api/favorites/{id}` | 按 `id` 部分更新（不是按 `name`） | `200` + `FavoriteDto` |
 | `DELETE /api/favorites/{id}` | 删除 | `204` 空 body |
 | `POST /api/favorites/{id}/image` | 替换海报 | `200` + `FavoriteDto` |
+
+`GET /api/auth/verify` 走同一鉴权中间件：key 正确返回 `200`（`data.valid = true`），错误/缺失返回 `401`——客户端（机器人 / agent）可用它在提交前先校验 key：
+
+```bash
+curl -s -o /dev/null -w "%{http_code}\n" \
+  -H "X-API-Key: $MEMENTO_API_KEY" \
+  http://localhost:23457/api/auth/verify   # 200 = 正确，401 = 错误
+```
 
 `POST` / `PUT` 的请求体为 JSON（`Content-Type: application/json`）。下表为全部可接受字段；列「创建」「更新」标注该字段在两个端点下是否必填：
 

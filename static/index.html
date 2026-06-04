@@ -4,9 +4,9 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="description" content="memento — 个人海报墙，珍藏喜爱的游戏、图书与电影。" />
-  <title>memento · 我的收藏</title>
+  <title>{{SITE_NAME}}</title>
   <link rel="stylesheet" href="/static/styles.css" />
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🗂️</text></svg>" />
+  <link rel="icon" href="{{ICON}}" />
 </head>
 <body>
   <!-- Ambient glow layer (decorative) -->
@@ -17,7 +17,7 @@
     <div class="topbar__inner">
       <a class="brand" href="/" aria-label="memento 首页">
         <span class="brand__mark" aria-hidden="true"></span>
-        <span class="brand__name">memento</span>
+        <span class="brand__name">{{SITE_NAME}}</span>
       </a>
 
       <div class="search" role="search">
@@ -39,7 +39,7 @@
     <section class="hero">
       <p class="hero__eyebrow">收藏 · COLLECTION</p>
       <h1 class="hero__title">我的收藏</h1>
-      <p class="hero__subtitle">所有的美好都值得被珍藏与分享。</p>
+      <p class="hero__subtitle">{{SLOGAN}}</p>
     </section>
 
     <!-- Filter chips -->

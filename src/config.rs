@@ -11,6 +11,55 @@ const DEFAULT_DB_PATH: &str = "./memento.db";
 /// Length (in bytes) of a generated ephemeral API key before hex-encoding.
 const GENERATED_KEY_BYTES: usize = 24;
 
+/// Default site name (shown in the page title and top-bar brand).
+pub const DEFAULT_SITE_NAME: &str = "memento";
+/// Default hero slogan / subtitle.
+pub const DEFAULT_SLOGAN: &str = "所有的美好都值得被珍藏与分享。";
+/// Default favicon — an inline emoji SVG data URI (no external request).
+pub const DEFAULT_ICON: &str = "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🗂️</text></svg>";
+
+/// Operator-customisable display strings, injected into `index.html` at serve
+/// time. Each falls back to a built-in default when its env var is unset/blank.
+#[derive(Debug, Clone)]
+pub struct SiteConfig {
+    /// `MEMENTO_SITE_NAME` — page title + brand text.
+    pub name: String,
+    /// `MEMENTO_SLOGAN` — hero subtitle.
+    pub slogan: String,
+    /// `MEMENTO_ICON` — favicon href (a URL or data URI).
+    pub icon: String,
+}
+
+impl Default for SiteConfig {
+    fn default() -> Self {
+        Self {
+            name: DEFAULT_SITE_NAME.to_string(),
+            slogan: DEFAULT_SLOGAN.to_string(),
+            icon: DEFAULT_ICON.to_string(),
+        }
+    }
+}
+
+impl SiteConfig {
+    /// Read the site display config from the environment, applying defaults.
+    pub fn from_env() -> Self {
+        Self {
+            name: env_or("MEMENTO_SITE_NAME", DEFAULT_SITE_NAME),
+            slogan: env_or("MEMENTO_SLOGAN", DEFAULT_SLOGAN),
+            icon: env_or("MEMENTO_ICON", DEFAULT_ICON),
+        }
+    }
+}
+
+/// Read a trimmed non-empty env var, or fall back to `default`.
+fn env_or(key: &str, default: &str) -> String {
+    env::var(key)
+        .ok()
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+        .unwrap_or_else(|| default.to_string())
+}
+
 /// Application configuration derived from the process environment.
 #[derive(Debug, Clone)]
 pub struct Config {
@@ -22,6 +71,8 @@ pub struct Config {
     pub db_path: String,
     /// Address to bind the HTTP server to.
     pub bind: String,
+    /// Operator-customisable site display strings.
+    pub site: SiteConfig,
 }
 
 impl Config {
@@ -50,6 +101,7 @@ impl Config {
             api_key_generated,
             db_path,
             bind,
+            site: SiteConfig::from_env(),
         }
     }
 }
@@ -101,6 +153,9 @@ mod tests {
         env::remove_var("MEMENTO_API_KEY");
         env::remove_var("MEMENTO_DB_PATH");
         env::remove_var("MEMENTO_BIND");
+        env::remove_var("MEMENTO_SITE_NAME");
+        env::remove_var("MEMENTO_SLOGAN");
+        env::remove_var("MEMENTO_ICON");
     }
 
     #[test]
@@ -131,6 +186,37 @@ mod tests {
         assert_eq!(cfg.api_key, "secret");
         assert_eq!(cfg.db_path, "/tmp/x.db");
         assert_eq!(cfg.bind, "127.0.0.1:9000");
+
+        clear_env();
+    }
+
+    #[test]
+    fn site_config_defaults_when_unset() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        clear_env();
+
+        let site = SiteConfig::from_env();
+        assert_eq!(site.name, DEFAULT_SITE_NAME);
+        assert_eq!(site.slogan, DEFAULT_SLOGAN);
+        assert_eq!(site.icon, DEFAULT_ICON);
+    }
+
+    #[test]
+    fn site_config_reads_and_trims_overrides() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        clear_env();
+        env::set_var("MEMENTO_SITE_NAME", "  老王的收藏  ");
+        env::set_var("MEMENTO_SLOGAN", "随心记录");
+        env::set_var("MEMENTO_ICON", "https://example.com/fav.png");
+
+        let site = SiteConfig::from_env();
+        assert_eq!(site.name, "老王的收藏");
+        assert_eq!(site.slogan, "随心记录");
+        assert_eq!(site.icon, "https://example.com/fav.png");
+
+        // Blank override falls back to the default.
+        env::set_var("MEMENTO_SLOGAN", "   ");
+        assert_eq!(SiteConfig::from_env().slogan, DEFAULT_SLOGAN);
 
         clear_env();
     }

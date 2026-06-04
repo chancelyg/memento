@@ -12,3 +12,12 @@ use crate::error::ApiResponse;
 pub async fn health() -> impl IntoResponse {
     Json(ApiResponse::ok(json!({ "status": "ok" })))
 }
+
+/// `GET /api/auth/verify` — confirm the supplied `X-API-Key` is valid.
+///
+/// This route lives behind the API-key middleware, so reaching the handler at
+/// all means the key was correct; a wrong/missing key is rejected upstream with
+/// `401`. Lets a client (bot / agent) check its key before attempting writes.
+pub async fn verify_key() -> impl IntoResponse {
+    Json(ApiResponse::ok(json!({ "valid": true })))
+}

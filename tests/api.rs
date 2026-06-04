@@ -589,3 +589,95 @@ async fn static_route_rejects_path_traversal() {
         "traversal attempt must not return 200, got {status}"
     );
 }
+
+#[tokio::test]
+async fn index_substitutes_default_site_strings() {
+    let (app, _tmp) = fresh_app();
+    let req = Request::builder()
+        .method("GET")
+        .uri("/")
+        .body(Body::empty())
+        .unwrap();
+    let (status, body) = send(&app, req).await;
+    assert_eq!(status, StatusCode::OK);
+    let html = String::from_utf8_lossy(&body);
+    assert!(!html.contains("{{"), "all placeholders must be substituted");
+    assert!(html.contains("memento"), "default site name present");
+    assert!(
+        html.contains("所有的美好都值得被珍藏与分享。"),
+        "default slogan present"
+    );
+}
+
+#[tokio::test]
+async fn index_substitutes_custom_site_strings() {
+    let tmp = tempfile::NamedTempFile::new().unwrap();
+    let pool = memento::db::build_pool(tmp.path().to_str().unwrap()).unwrap();
+    memento::db::init_schema(&pool).unwrap();
+    let site = memento::config::SiteConfig {
+        name: "老王的收藏".to_string(),
+        slogan: "随心记录每一份热爱".to_string(),
+        icon: "https://example.com/fav.png".to_string(),
+    };
+    let state = memento::state::AppState::new(pool, "testkey".to_string()).with_site(site);
+    let app = memento::build_router(state);
+
+    let req = Request::builder()
+        .method("GET")
+        .uri("/")
+        .body(Body::empty())
+        .unwrap();
+    let (status, body) = send(&app, req).await;
+    assert_eq!(status, StatusCode::OK);
+    let html = String::from_utf8_lossy(&body);
+    assert!(html.contains("老王的收藏"), "custom site name injected");
+    assert!(
+        html.contains("随心记录每一份热爱"),
+        "custom slogan injected"
+    );
+    assert!(
+        html.contains("https://example.com/fav.png"),
+        "custom favicon injected"
+    );
+}
+
+#[tokio::test]
+async fn verify_with_correct_key_returns_valid() {
+    let (app, _tmp) = fresh_app();
+    let req = Request::builder()
+        .method("GET")
+        .uri("/api/auth/verify")
+        .header("x-api-key", "testkey")
+        .body(Body::empty())
+        .unwrap();
+    let (status, bytes) = send(&app, req).await;
+    assert_eq!(status, StatusCode::OK);
+    let json = parse_json(&bytes);
+    assert_eq!(json["success"], json!(true));
+    assert_eq!(json["data"]["valid"], json!(true));
+}
+
+#[tokio::test]
+async fn verify_without_key_is_unauthorized() {
+    let (app, _tmp) = fresh_app();
+    let req = Request::builder()
+        .method("GET")
+        .uri("/api/auth/verify")
+        .body(Body::empty())
+        .unwrap();
+    let (status, _bytes) = send(&app, req).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn verify_with_wrong_key_is_unauthorized() {
+    let (app, _tmp) = fresh_app();
+    let req = Request::builder()
+        .method("GET")
+        .uri("/api/auth/verify")
+        .header("x-api-key", "nope")
+        .body(Body::empty())
+        .unwrap();
+    let (status, _bytes) = send(&app, req).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+}

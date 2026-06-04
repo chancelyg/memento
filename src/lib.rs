@@ -60,7 +60,7 @@ pub async fn run() -> Result<(), AppError> {
     db::init_schema(&pool)?;
     tracing::info!(db_path = %config.db_path, "database ready");
 
-    let state = AppState::new(pool, config.api_key.clone());
+    let state = AppState::new(pool, config.api_key.clone()).with_site(config.site.clone());
     let app = build_router(state);
 
     let listener = tokio::net::TcpListener::bind(&config.bind)
@@ -82,6 +82,7 @@ pub async fn run() -> Result<(), AppError> {
 pub fn build_router(state: AppState) -> Router {
     // Write routes guarded by the API-key middleware.
     let guarded = Router::new()
+        .route("/api/auth/verify", get(handlers::verify_key))
         .route("/api/favorites", post(handlers::favorites::create_favorite))
         .route(
             "/api/favorites/{id}",
