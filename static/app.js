@@ -543,6 +543,8 @@
       })
       .catch(function (err) {
         if (reset) $grid.textContent = "";
+        $loadMore.textContent = "加载更多收藏…";
+        if (reset) $loadMore.hidden = true;
         showToast("加载失败，请稍后重试");
         if (window.console && console.error) console.error("[memento] fetch error:", err);
       })
