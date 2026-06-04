@@ -1,5 +1,7 @@
 # memento
 
+[![CI](https://github.com/chancelyg/memento/actions/workflows/ci.yml/badge.svg)](https://github.com/chancelyg/memento/actions/workflows/ci.yml)
+
 电影 / 游戏 / 图书三合一的个人海报墙。一个 Rust 单文件二进制 Web 应用：数据和前端都打包进可执行文件，读取公开、写入用 API Key 鉴权。
 
 数据存在本地 SQLite 文件里（含海报图片本身），前端静态资源在编译期内嵌进二进制，所以部署只需要拷贝一个文件。新增、修改收藏都通过 HTTP API 完成，方便由脚本、Telegram 机器人或 agent 提交。
