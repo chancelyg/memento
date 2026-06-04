@@ -1,6 +1,8 @@
 /* ============================================================
-   memento — poster wall front-end logic (vanilla JS, no deps)
-   Talks to GET /api/favorites and per-item image_url.
+   memento — Cinematic Dark Editorial poster wall (vanilla JS)
+   Read-only public display. Talks to GET /api/favorites and
+   per-item image_url. No external deps, no build step.
+   All API text inserted via textContent (never innerHTML).
    ============================================================ */
 (function () {
   "use strict";
@@ -10,12 +12,12 @@
   var THEME_KEY = "memento-theme";
 
   var TYPE_META = {
-    game:  { label: "游戏", emoji: "🎮", cls: "badge--game" },
-    movie: { label: "电影", emoji: "🎬", cls: "badge--movie" },
-    book:  { label: "图书", emoji: "📚", cls: "badge--book" }
+    game:  { label: "游戏", emoji: "🎮", cls: "badge--game",  accent: "rgba(74,110,220,0.30)" },
+    movie: { label: "电影", emoji: "🎬", cls: "badge--movie", accent: "rgba(214,78,110,0.30)" },
+    book:  { label: "图书", emoji: "📚", cls: "badge--book",  accent: "rgba(54,168,130,0.30)" }
   };
 
-  /* ---------- State (treated immutably-ish: replace, don't mutate) ---------- */
+  /* ---------- State (replaced, not mutated) ---------- */
   var state = {
     type: "all",
     q: "",
@@ -36,25 +38,27 @@
   var $themeBtn   = document.getElementById("themeToggle");
 
   /* Modal refs */
-  var $modal      = document.getElementById("modal");
-  var $modalImg   = document.getElementById("modalImg");
-  var $modalBadge = document.getElementById("modalBadge");
-  var $modalTitle = document.getElementById("modalTitle");
-  var $modalAka   = document.getElementById("modalAka");
-  var $modalSum   = document.getElementById("modalSummary");
-  var $modalFields= document.getElementById("modalFields");
-  var $modalLink  = document.getElementById("modalLink");
+  var $modal       = document.getElementById("modal");
+  var $modalAmbient= document.getElementById("modalAmbient");
+  var $modalImg    = document.getElementById("modalImg");
+  var $modalBadge  = document.getElementById("modalBadge");
+  var $modalTitle  = document.getElementById("modalTitle");
+  var $modalAka    = document.getElementById("modalAka");
+  var $modalRating = document.getElementById("modalRating");
+  var $modalSum    = document.getElementById("modalSummary");
+  var $modalFields = document.getElementById("modalFields");
+  var $modalLink   = document.getElementById("modalLink");
 
   /* ============================================================
      Utilities
      ============================================================ */
 
-  /* Escape text for safe text-node insertion (we never use innerHTML w/ API data). */
+  /* Safe text-node insertion (never innerHTML with API data). */
   function setText(el, value) {
     el.textContent = (value === null || value === undefined) ? "" : String(value);
   }
 
-  /* Coerce a value (string | array | null) into a clean display string. */
+  /* Coerce (string | array | null) into a clean list of strings. */
   function asList(value) {
     if (value === null || value === undefined) return [];
     if (Array.isArray(value)) {
@@ -82,12 +86,19 @@
     return [];
   }
 
-  /* Friendly date: take leading YYYY-MM-DD / YYYY portion if present. */
+  /* Friendly date: leading YYYY-MM-DD / YYYY portion if present. */
   function fmtDate(value) {
     if (!value) return "";
     var s = String(value);
     var m = s.match(/\d{4}(-\d{2}(-\d{2})?)?/);
     return m ? m[0] : s;
+  }
+
+  /* Just the year, for compact captions. */
+  function fmtYear(value) {
+    if (!value) return "";
+    var m = String(value).match(/\d{4}/);
+    return m ? m[0] : "";
   }
 
   function extraOf(item) {
@@ -107,23 +118,31 @@
   function showToast(msg) {
     setText($toast, msg);
     $toast.hidden = false;
-    /* force reflow so transition runs */
-    void $toast.offsetWidth;
+    void $toast.offsetWidth; /* reflow so transition runs */
     $toast.classList.add("is-visible");
     clearTimeout(showToast._t);
     showToast._t = setTimeout(function () {
       $toast.classList.remove("is-visible");
-      setTimeout(function () { $toast.hidden = true; }, 280);
+      setTimeout(function () { $toast.hidden = true; }, 300);
     }, 3600);
   }
 
+  /* Fill ratio (0..1) for a 0..10 rating, drives a CSS star bar.
+     Avoids any font-dependent half-star glyph (e.g. ⯨) entirely. */
+  function ratingFill(rating) {
+    var score = Number(rating);
+    if (!isFinite(score)) return 0;
+    return Math.max(0, Math.min(1, score / 10));
+  }
+
   /* ============================================================
-     Theme toggle
+     Theme toggle (persisted in localStorage)
      ============================================================ */
   function applyTheme(theme) {
     document.documentElement.setAttribute("data-theme", theme);
     var icon = $themeBtn.querySelector(".theme-toggle__icon");
     if (icon) icon.textContent = theme === "light" ? "☀️" : "🌙";
+    $themeBtn.setAttribute("aria-pressed", theme === "light" ? "true" : "false");
   }
 
   function initTheme() {
@@ -150,7 +169,7 @@
           obs.unobserve(entry.target);
         }
       });
-    }, { rootMargin: "200px 0px" });
+    }, { rootMargin: "300px 0px" });
   }
 
   function loadImage(imgEl) {
@@ -162,11 +181,10 @@
       if (skeleton) skeleton.remove();
     });
     imgEl.addEventListener("error", function () {
-      /* graceful fallback: swap skeleton for a fallback box */
       if (skeleton) skeleton.remove();
       var poster = imgEl.parentNode;
       imgEl.remove();
-      poster.appendChild(buildFallback());
+      poster.insertBefore(buildFallback(), poster.firstChild);
     });
     imgEl.src = src;
   }
@@ -185,41 +203,30 @@
   }
 
   /* ============================================================
-     Meta lines per type (for cards)
+     Compact meta line for hover scrim (one line per card)
      ============================================================ */
-  function metaLines(item) {
+  function scrimMeta(item) {
     var ex = extraOf(item);
-    var lines = [];
-
+    var bits = [];
     if (item.type === "game") {
-      pushMeta(lines, "类型", joinList(item.genres));
-      pushMeta(lines, "平台", joinList(ex.platforms));
-      pushMeta(lines, "开发商", ex.developer);
-      pushMeta(lines, "发布", fmtDate(item.release_date));
+      bits.push(ex.developer, joinList(item.genres));
     } else if (item.type === "movie") {
-      pushMeta(lines, "导演", ex.director);
-      pushMeta(lines, "类型", joinList(item.genres));
-      pushMeta(lines, "国家", ex.country);
-      pushMeta(lines, "上映", fmtDate(item.release_date));
+      bits.push(ex.director, joinList(item.genres));
     } else if (item.type === "book") {
-      pushMeta(lines, "作者", ex.author);
-      pushMeta(lines, "出版社", ex.publisher);
-      pushMeta(lines, "出版年份", fmtDate(item.release_date));
+      bits.push(ex.author, ex.publisher);
     } else {
-      pushMeta(lines, "类型", joinList(item.genres));
+      bits.push(joinList(item.genres));
     }
-    return lines.slice(0, 3);
-  }
-
-  function pushMeta(lines, label, value) {
-    if (value === null || value === undefined) return;
-    var s = String(value).trim();
-    if (!s) return;
-    lines.push(label + "：" + s);
+    var year = fmtYear(item.release_date);
+    if (year) bits.push(year);
+    return bits
+      .map(function (b) { return (b === null || b === undefined) ? "" : String(b).trim(); })
+      .filter(function (b) { return b; })
+      .join(" · ");
   }
 
   /* ============================================================
-     Card rendering
+     Card rendering — poster-first, metadata on hover/caption
      ============================================================ */
   function buildCard(item) {
     var meta = TYPE_META[item.type] || { label: item.type, emoji: "•", cls: "" };
@@ -233,11 +240,6 @@
     var poster = document.createElement("div");
     poster.className = "card__poster";
 
-    var badge = document.createElement("span");
-    badge.className = "card__badge badge " + meta.cls;
-    badge.textContent = meta.emoji + " " + meta.label;
-    poster.appendChild(badge);
-
     if (item.image_url) {
       var skeleton = document.createElement("div");
       skeleton.className = "skeleton";
@@ -247,6 +249,7 @@
       img.className = "card__img";
       img.alt = item.name;
       img.loading = "lazy";
+      img.decoding = "async";
       img.setAttribute("data-src", item.image_url);
       poster.appendChild(img);
 
@@ -255,32 +258,47 @@
     } else {
       poster.appendChild(buildFallback());
     }
+
+    /* Type badge */
+    var badge = document.createElement("span");
+    badge.className = "card__badge badge " + meta.cls;
+    badge.textContent = meta.emoji + " " + meta.label;
+    poster.appendChild(badge);
+
+    /* Hover scrim: title + one meta line revealed over the art */
+    var scrim = document.createElement("div");
+    scrim.className = "card__scrim";
+    var sTitle = document.createElement("p");
+    sTitle.className = "card__scrim-title";
+    setText(sTitle, item.name);
+    scrim.appendChild(sTitle);
+    var metaLine = scrimMeta(item);
+    if (metaLine) {
+      var sMeta = document.createElement("p");
+      sMeta.className = "card__scrim-meta";
+      setText(sMeta, metaLine);
+      scrim.appendChild(sMeta);
+    }
+    poster.appendChild(scrim);
+
     card.appendChild(poster);
 
-    /* Body */
-    var body = document.createElement("div");
-    body.className = "card__body";
-
+    /* Persistent caption under poster (title + year) */
+    var caption = document.createElement("div");
+    caption.className = "card__caption";
     var title = document.createElement("h3");
     title.className = "card__title";
     setText(title, item.name);
-    body.appendChild(title);
+    caption.appendChild(title);
 
-    metaLines(item).forEach(function (line) {
-      var p = document.createElement("p");
-      p.className = "card__meta";
-      setText(p, line);
-      body.appendChild(p);
-    });
-
-    var date = fmtDate(item.sort_date);
-    if (date) {
-      var d = document.createElement("p");
-      d.className = "card__date";
-      setText(d, date);
-      body.appendChild(d);
+    var year = fmtYear(item.release_date) || fmtYear(item.sort_date);
+    if (year) {
+      var y = document.createElement("p");
+      y.className = "card__year";
+      setText(y, year);
+      caption.appendChild(y);
     }
-    card.appendChild(body);
+    card.appendChild(caption);
 
     card.addEventListener("click", function () { openModal(item); });
     return card;
@@ -328,16 +346,16 @@
       add("装帧", ex.binding);
       add("ISBN", ex.isbn);
     }
-    if (item.rating !== null && item.rating !== undefined && item.rating !== "") {
-      add("评分", item.rating);
-    }
     add("收藏日期", fmtDate(item.sort_date));
     return rows;
   }
 
   function openModal(item) {
-    var meta = TYPE_META[item.type] || { label: item.type, emoji: "•", cls: "" };
+    var meta = TYPE_META[item.type] || { label: item.type, emoji: "•", cls: "", accent: "" };
     lastFocused = document.activeElement;
+
+    /* Ambient accent behind panel, tinted by media type */
+    $modalAmbient.style.setProperty("--modal-accent", meta.accent || "");
 
     /* Poster */
     if (item.image_url) {
@@ -359,6 +377,21 @@
     var aka = normalizeAka(item.aka);
     setText($modalAka, aka.length ? "又名：" + aka.join(" / ") : "");
 
+    /* rating — CSS star bar (no font-dependent half-star glyph) */
+    if (item.rating !== null && item.rating !== undefined && item.rating !== "" && isFinite(Number(item.rating))) {
+      var num = Number(item.rating);
+      var fillEl = $modalRating.querySelector(".modal__rating-fill");
+      var numEl = $modalRating.querySelector(".modal__rating-num");
+      if (fillEl) fillEl.style.width = (ratingFill(num) * 100).toFixed(2) + "%";
+      if (numEl) setText(numEl, num.toFixed(1) + " / 10");
+      $modalRating.setAttribute("role", "img");
+      $modalRating.setAttribute("aria-label", "评分 " + num.toFixed(1) + " / 10");
+      $modalRating.hidden = false;
+    } else {
+      $modalRating.hidden = true;
+      $modalRating.removeAttribute("aria-label");
+    }
+
     /* summary */
     setText($modalSum, item.summary || "");
 
@@ -373,7 +406,7 @@
       $modalFields.appendChild(dd);
     });
 
-    /* source link — only allow http(s) hrefs (defence-in-depth vs javascript: URIs) */
+    /* source link — only http(s) hrefs (defence vs javascript: URIs) */
     if (item.url && /^https?:\/\//i.test(item.url)) {
       $modalLink.href = item.url;
       $modalLink.hidden = false;
@@ -443,10 +476,9 @@
       sk.className = "skeleton";
       poster.appendChild(sk);
       card.appendChild(poster);
-      var body = document.createElement("div");
-      body.className = "card__body";
-      body.style.minHeight = "70px";
-      card.appendChild(body);
+      var caption = document.createElement("div");
+      caption.className = "card__caption";
+      card.appendChild(caption);
       $grid.appendChild(card);
     }
   }
@@ -456,7 +488,7 @@
       setText($count, "");
       return;
     }
-    setText($count, "已展示 " + state.loaded + " 项收藏，共 " + state.total + " 项");
+    setText($count, "已展示 " + state.loaded + " / " + state.total + " 项收藏");
   }
 
   function fetchPage(reset) {
@@ -469,7 +501,7 @@
       state.page = 1;
       state.loaded = 0;
       $empty.hidden = true;
-      renderSkeletonGrid(8);
+      renderSkeletonGrid(12);
     } else {
       $loadMore.textContent = "加载中…";
     }
@@ -497,7 +529,6 @@
 
         state.loaded += items.length;
 
-        /* Empty state */
         if (state.total === 0) {
           $grid.textContent = "";
           $empty.hidden = false;
@@ -505,7 +536,6 @@
           $empty.hidden = true;
         }
 
-        /* Load more visibility */
         $loadMore.hidden = state.loaded >= state.total;
         $loadMore.textContent = "加载更多收藏…";
 

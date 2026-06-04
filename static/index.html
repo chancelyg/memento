@@ -9,13 +9,24 @@
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🗂️</text></svg>" />
 </head>
 <body>
-  <!-- Top bar -->
+  <!-- Ambient glow layer (decorative) -->
+  <div class="ambient" aria-hidden="true"></div>
+
+  <!-- Top bar (glass) -->
   <header class="topbar" role="banner">
     <div class="topbar__inner">
       <a class="brand" href="/" aria-label="memento 首页">
-        <span class="brand__mark">◆</span>
+        <span class="brand__mark" aria-hidden="true"></span>
         <span class="brand__name">memento</span>
       </a>
+
+      <div class="search" role="search">
+        <span class="search__icon" aria-hidden="true">🔍</span>
+        <input id="searchInput" class="search__input" type="search"
+               placeholder="搜索收藏…" autocomplete="off"
+               aria-label="按名称搜索收藏" />
+      </div>
+
       <button id="themeToggle" class="theme-toggle" type="button"
               aria-label="切换浅色 / 深色主题" title="切换主题">
         <span class="theme-toggle__icon" aria-hidden="true">🌙</span>
@@ -24,32 +35,25 @@
   </header>
 
   <main class="container" role="main">
-    <!-- Hero -->
+    <!-- Editorial hero -->
     <section class="hero">
+      <p class="hero__eyebrow">收藏 · COLLECTION</p>
       <h1 class="hero__title">我的收藏</h1>
       <p class="hero__subtitle">所有的美好都值得被珍藏与分享。</p>
     </section>
 
-    <!-- Controls: filter pills + search -->
-    <section class="controls" aria-label="筛选与搜索">
+    <!-- Filter chips -->
+    <section class="controls" aria-label="筛选">
       <div class="pills" role="tablist" aria-label="类型筛选">
         <button class="pill is-active" role="tab" aria-selected="true" data-type="all">全部</button>
-        <button class="pill" role="tab" aria-selected="false" data-type="game"><span aria-hidden="true">🎮</span> 游戏</button>
-        <button class="pill" role="tab" aria-selected="false" data-type="book"><span aria-hidden="true">📚</span> 图书</button>
-        <button class="pill" role="tab" aria-selected="false" data-type="movie"><span aria-hidden="true">🎬</span> 电影</button>
+        <button class="pill" role="tab" aria-selected="false" data-type="game"><span class="pill__emoji" aria-hidden="true">🎮</span> 游戏</button>
+        <button class="pill" role="tab" aria-selected="false" data-type="book"><span class="pill__emoji" aria-hidden="true">📚</span> 图书</button>
+        <button class="pill" role="tab" aria-selected="false" data-type="movie"><span class="pill__emoji" aria-hidden="true">🎬</span> 电影</button>
       </div>
-      <div class="search">
-        <span class="search__icon" aria-hidden="true">🔍</span>
-        <input id="searchInput" class="search__input" type="search"
-               placeholder="搜索收藏…" autocomplete="off"
-               aria-label="按名称搜索收藏" />
-      </div>
+      <p id="countLine" class="count-line" aria-live="polite"></p>
     </section>
 
-    <!-- Count line -->
-    <p id="countLine" class="count-line" aria-live="polite"></p>
-
-    <!-- Grid -->
+    <!-- Poster wall -->
     <section id="grid" class="grid" aria-label="收藏海报墙" aria-busy="false"></section>
 
     <!-- Empty state -->
@@ -64,9 +68,10 @@
     </div>
   </main>
 
-  <!-- Detail modal -->
+  <!-- Detail modal (glass over ambient backdrop) -->
   <div id="modal" class="modal" hidden role="dialog" aria-modal="true" aria-labelledby="modalTitle">
     <div class="modal__backdrop" data-close></div>
+    <div class="modal__ambient" id="modalAmbient" aria-hidden="true"></div>
     <div class="modal__panel" role="document">
       <button class="modal__close" type="button" aria-label="关闭" data-close>✕</button>
       <div class="modal__body">
@@ -77,6 +82,12 @@
           <span id="modalBadge" class="badge"></span>
           <h2 id="modalTitle" class="modal__title"></h2>
           <p id="modalAka" class="modal__aka"></p>
+          <div id="modalRating" class="modal__rating" hidden>
+            <span class="modal__rating-stars" aria-hidden="true">
+              <span class="modal__rating-fill"></span>
+            </span>
+            <span class="modal__rating-num"></span>
+          </div>
           <p id="modalSummary" class="modal__summary"></p>
           <dl id="modalFields" class="fields"></dl>
           <a id="modalLink" class="source-btn" target="_blank" rel="noopener" hidden>前往源页面 ↗</a>
