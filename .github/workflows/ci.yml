@@ -40,3 +40,6 @@ jobs:
 
       - name: Release build
         run: cargo build --release
+
+      - name: Diary importer tests (Python standard library)
+        run: python3 -B -m unittest discover -s tests -p test_import_diaries.py -v

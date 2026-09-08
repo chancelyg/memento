@@ -51,6 +51,12 @@ pub enum AppError {
     #[error("not found")]
     NotFound,
 
+    #[error("diary version has changed; reload before retrying")]
+    PreconditionFailed,
+
+    #[error("{0}")]
+    Conflict(String),
+
     /// Database / connection-pool failure.
     #[error("database error")]
     Database(#[source] anyhow_like::BoxError),
@@ -77,6 +83,8 @@ impl AppError {
             AppError::BadRequest(_) => StatusCode::BAD_REQUEST,
             AppError::Unauthorized => StatusCode::UNAUTHORIZED,
             AppError::NotFound => StatusCode::NOT_FOUND,
+            AppError::PreconditionFailed => StatusCode::PRECONDITION_FAILED,
+            AppError::Conflict(_) => StatusCode::CONFLICT,
             AppError::Database(_) | AppError::ImageFetch(_) | AppError::Internal(_) => {
                 StatusCode::INTERNAL_SERVER_ERROR
             }
@@ -89,6 +97,10 @@ impl AppError {
             AppError::BadRequest(msg) => msg.clone(),
             AppError::Unauthorized => "invalid or missing API key".to_string(),
             AppError::NotFound => "not found".to_string(),
+            AppError::PreconditionFailed => {
+                "diary version has changed; reload before retrying".into()
+            }
+            AppError::Conflict(message) => message.clone(),
             AppError::Database(_) => "a database error occurred".to_string(),
             AppError::ImageFetch(_) => "failed to fetch the remote image".to_string(),
             AppError::Internal(_) => "an internal error occurred".to_string(),
@@ -106,6 +118,7 @@ impl IntoResponse for AppError {
             AppError::BadRequest(msg) => tracing::debug!(message = %msg, "bad request"),
             AppError::Unauthorized => tracing::debug!("unauthorized request"),
             AppError::NotFound => tracing::debug!("resource not found"),
+            AppError::PreconditionFailed | AppError::Conflict(_) => {}
         }
 
         let status = self.status();

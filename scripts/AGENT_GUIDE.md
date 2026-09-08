@@ -1,12 +1,15 @@
 # memento 写接口接入指南（给 AI agent）
 
-面向 openclaw / nanobot 这类需要代用户向海报墙提交收藏的 agent。目标是：拿到一条电影 / 游戏 / 图书信息后，组织出正确的 payload，调用创建或更新接口，并能看懂返回结果。
+面向 openclaw / nanobot 这类代用户提交收藏或操作私有日记的 agent。下文收藏流程保持原有协议；日记请使用末尾的独立流程，不要复用收藏 payload 或浏览器登录。
 
 ## 准备
 
 - 服务地址，例如 `http://localhost:23457`（下文记作 `BASE`）。
 - 写鉴权 key，放在请求头 `X-API-Key`。key 通常来自环境变量 `MEMENTO_API_KEY`。
-- 读接口不需要 key，写接口（创建 / 更新 / 删除 / 上传图片）都需要。
+- 服务启动未设置或仅配置空白 key 时，全部外部 key 鉴权接口禁用，日志不会给出临时 key。请由运维显式配置并安全分发固定 key；浏览器登录仍可独立使用，但不是 Agent 的鉴权替代。
+- 收藏读接口不需要 key，收藏写接口（创建 / 更新 / 删除 / 上传图片）都需要；日记 API 的读写全部需要 key。公网/不可信网络推荐 HTTPS，生产 HTTP 内网反代也受支持，不要求先有域名/证书。
+
+服务端无参数启动由系统 `MEMENTO_ENV` 选择 development/production，默认 production，仅加载 cwd 的选定 `.env.development`/`.env.production`，不读通用 `.env` 或父目录，系统值优先且文件不可切模式。开发使用 `MEMENTO_ENV=development cargo run`，生产示例使用 `MEMENTO_ENV=production ./memento` 经 Nginx 接入；两模式浏览器都必须密码 + TOTP，但这不改变 Agent 的 key 协议。Python helper 不自动加载这些环境文件，所需 key 应另行安全注入，不能从浏览器配置提取凭据。详见[运维文档](../docs/diary-operations.md)。
 
 最省事的做法是直接复用 [`submit_example.py`](submit_example.py) 里的 `submit_favorite(...)`，它已经处理好了 payload 组织、鉴权头和错误信封解析：
 
@@ -127,3 +130,33 @@ curl -X PUT "$BASE/api/favorites/151" \
 | 404 | 目标不存在 | PUT / DELETE / 图片端点的 `id` 不对 |
 
 `error` 是面向人的简短提示，可直接转述给用户；不要在失败时盲目重试 400 / 401。
+
+## 私有日记
+
+完整契约见 [日记 API](../docs/diary-api.md)，部署和离线旧库迁移见 [运维文档](../docs/diary-operations.md)。`submit_favorite(...)` 只处理收藏，不是日记客户端；`seed_import.py` 也不是日记迁移工具。
+
+### 权限边界
+
+- Agent 使用 `/api/diaries`，所有请求（包括列表和详情）都带 `X-API-Key`。本期 key 同时授予全部日记读写和收藏写权限，没有日记专用 key、只读 scope 或按 Agent 分权。
+- 不调用 `/session` 获取 cookie，不使用 `/private/diaries`，不收集用户浏览器密码、TOTP、cookie 或 CSRF token。那两组路径是同源浏览器协议，不是第三方登录体系。
+- 只在用户授权范围内读取正文和操作记录，避免把全文、搜索 query、认证头或响应体写入工具日志。不要在 shell 参数/history 中放真实正文，不开启请求 trace。
+
+### 操作流程
+
+1. 查找：`GET BASE/api/diaries`。参数为 `page`（默认 1）、`per_page`（默认 24，最多 100）、`q`（正文字面子串）、`start_date`/`end_date`（包含边界的 YYYY-MM-DD）、`sort=asc|desc`（默认 desc）。`data` 是 `{items,total,page,per_page}`，每个 item 包含完整正文。搜索、日期、total、分页和详情都只含未删除记录（deleted_at IS NULL）；DTO 仍为原六字段，不暴露 deleted_at。
+2. 确认对象：`GET BASE/api/diaries/{id}` 获取最新 `content`、`version` 和 `ETag`。同日期可能有多篇历史日记，不要把日期当唯一键；收藏 ID 和日记 ID 也不能混用。
+3. 创建：`POST BASE/api/diaries`，仅发送 JSON `{"content":"经用户确认的正文"}`，成功 201。正文 trim 后非空且最多 10000 个 Unicode 标量值，整份 JSON 最多 64 KiB。POST/PATCH 不可传 ID、日期、timestamp、version、deleted_at 或 extra，也不能恢复已删记录。
+4. 编辑：`PATCH BASE/api/diaries/{id}`，仅发送新的完整正文，带刚读取版本的 `If-Match: "<version>"`，成功 200 并返回新版本和 ETag。不是收藏的 PUT，也不是局部文字 patch；日期不可改。
+5. 删除：仅在用户明确授权后 `DELETE BASE/api/diaries/{id}`，带最新 If-Match，成功 204 空 body。它是软删除，不再显示但正文、原日期/created_at 仍保留；deleted_at 为 UTC RFC3339 毫秒时间，updated_at 同值，version 加一。本期无恢复、回收站或永久清除 API，不是安全擦除；收藏仍硬删。
+
+没有未删除日记时，新篇日期取业务时区今天（默认 Asia/Shanghai）；否则取未删除最大日期加一天。删末篇后可能重用该日期，删中间项不补洞，全部软删后重新取今天，但物理表仍有记录，不应向用户报告为日期分配 bug。历史空白正文、重复日期和 null/旧字符串 timestamp 按原值读取；新提交必须符合当前正文规范，不自动“修复”历史数据。
+
+### 冲突与重试
+
+- PATCH/DELETE 的 If-Match 可选，无头允许操作最新未删除记录，不再返回缺头 428。为保护用户修改，Agent 推荐继续先读后带版本，网页也仍传版本；合法格式如 `If-Match: "1"`，裸数字或通配符等非法头返回 400。
+- 412 表示未删除记录已被其他客户端修改。保留用户草稿，重新读最新正文，展示差异并取得确认后再提交；禁止仅替换版本号自动覆盖或删除。
+- 404 表示记录不存在或已软删除（前置校验通过后），PATCH/重复 DELETE 同样如此；不要自动 POST 重建，尤其是用户主动删除的记录。已删 ID 的非法 If-Match 仍为 400，省略不触发缺头错误；同版本并发 DELETE 仅一个 204、另一个 404。版本溢出为 409 且不删除。
+- POST 没有幂等键或正文去重，网络超时后先查询确认是否已创建，不能盲重试生成下一日期的重复日记。PATCH/DELETE 响应不明时同样重新读取核对。
+- 400/413/415 修正请求再发；401 检查 key，不回退到浏览器密码；409 和内部错误停止自动写入并报告脱敏信息。
+
+不调用不存在的 stats、goal、audit、恢复、回收站、永久清除或独立 JSON 导入导出端点。旧库迁移只使用 `import_diaries.py` 的独立停服流程：目标须先初始化/升级至完整 schema v3（迁移历史 1、2、3），含 browser_totp_state 元数据校验；导入器不读该表真实状态。默认 dry-run，--apply 才写目标。source 五字段不变，新导入显式 deleted_at=NULL；匹配 ledger 则跳过，不覆盖编辑、不清软删或复活。软删 diary_id 仍指原行，ON DELETE SET NULL 仅兼容历史物理删除。首次导入要求物理空目标日记表，全部软删不满足；所有未入 ledger 的源 ID 必须大于目标日记 sqlite_sequence 的导入前 high watermark，历史硬删本地 ID 也不能复用。不能用它代替在线批量 POST，不能靠删 ledger、目标数据或重置 sequence 处理冲突；计数以实际 dry-run 输出为准。

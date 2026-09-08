@@ -15,6 +15,11 @@ use crate::state::AppState;
 #[folder = "static/"]
 pub struct StaticAssets;
 
+/// The diary shell contains no private data; all content is fetched after login.
+pub async fn diary_handler() -> Response {
+    serve_embedded("diary.html")
+}
+
 /// Serve `index.html` at `/`, injecting the operator-configured site name,
 /// slogan and favicon into the template placeholders.
 pub async fn index_handler(State(state): State<AppState>) -> Response {

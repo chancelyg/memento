@@ -10,8 +10,11 @@
 
 pub mod assets;
 pub mod auth;
+pub mod browser;
+pub mod cli;
 pub mod config;
 pub mod db;
+pub mod diary;
 pub mod error;
 pub mod handlers;
 pub mod image;
@@ -20,9 +23,10 @@ pub mod repo;
 pub mod state;
 
 use axum::{
-    extract::DefaultBodyLimit,
-    http::{header, HeaderValue},
+    extract::{DefaultBodyLimit, Request},
+    http::{header, HeaderValue, StatusCode},
     middleware,
+    response::{IntoResponse, Response},
     routing::{get, post, put},
     Router,
 };
@@ -48,19 +52,31 @@ pub fn init_tracing() {
 /// Application bootstrap. Returns an error rather than panicking.
 pub async fn run() -> Result<(), AppError> {
     let config = Config::from_env();
+    let browser = browser::BrowserAuth::from_env()?;
+    let diary_timezone = std::env::var("MEMENTO_DIARY_TIMEZONE")
+        .unwrap_or_else(|_| "Asia/Shanghai".into())
+        .parse::<chrono_tz::Tz>()
+        .map_err(|_| AppError::BadRequest("invalid diary timezone".into()))?;
 
     if config.api_key_generated {
-        tracing::warn!(
-            "generated ephemeral API key: {} (set MEMENTO_API_KEY to persist it in production)",
-            config.api_key
-        );
+        tracing::warn!("MEMENTO_API_KEY is unset; external API access is disabled until a fixed key is configured");
     }
 
     let pool = db::build_pool(&config.db_path)?;
     db::init_schema(&pool)?;
     tracing::info!(db_path = %config.db_path, "database ready");
 
-    let state = AppState::new(pool, config.api_key.clone()).with_site(config.site.clone());
+    let state = AppState::new(
+        pool,
+        if config.api_key_generated {
+            String::new()
+        } else {
+            config.api_key.clone()
+        },
+    )
+    .with_site(config.site.clone())
+    .with_browser(browser)
+    .with_diary_timezone(diary_timezone);
     let app = build_router(state);
 
     let listener = tokio::net::TcpListener::bind(&config.bind)
@@ -80,6 +96,51 @@ pub async fn run() -> Result<(), AppError> {
 
 /// Build the full router: public routes, guarded write routes, static assets.
 pub fn build_router(state: AppState) -> Router {
+    // Cookie routes stay same-origin. Production checks the configured Origin;
+    // development skips that deployment constraint, but both retain CSRF tokens.
+    let sessions = Router::new()
+        .route(
+            "/session",
+            post(browser::login)
+                .get(browser::status)
+                .delete(browser::logout),
+        )
+        .layer(DefaultBodyLimit::max(8 * 1024));
+    let private = Router::new()
+        .route(
+            "/private/diaries",
+            get(handlers::diary::list).post(handlers::diary::create),
+        )
+        .route(
+            "/private/diaries/{id}",
+            get(handlers::diary::get)
+                .patch(handlers::diary::update)
+                .delete(handlers::diary::delete),
+        )
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            browser::require_session,
+        ));
+    let diary_api = Router::new()
+        .route(
+            "/api/diaries",
+            get(handlers::diary::list).post(handlers::diary::create),
+        )
+        .route(
+            "/api/diaries/{id}",
+            get(handlers::diary::get)
+                .patch(handlers::diary::update)
+                .delete(handlers::diary::delete),
+        )
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            auth::require_api_key,
+        ));
+    let diary_routes = sessions
+        .merge(private)
+        .merge(diary_api)
+        .route("/diary", get(assets::diary_handler))
+        .layer(middleware::from_fn(private_response));
     // Write routes guarded by the API-key middleware.
     let guarded = Router::new()
         .route("/api/auth/verify", get(handlers::verify_key))
@@ -115,6 +176,9 @@ pub fn build_router(state: AppState) -> Router {
 
     public
         .merge(guarded)
+        // Preserve existing key-based collection CORS without granting it to sessions.
+        .layer(CorsLayer::permissive())
+        .merge(diary_routes)
         // Security headers applied to every response. `nosniff` is important for
         // the image endpoint (prevents content-type sniffing of stored blobs);
         // `DENY`/`no-referrer` mitigate clickjacking and referrer leakage.
@@ -130,9 +194,24 @@ pub fn build_router(state: AppState) -> Router {
             header::REFERRER_POLICY,
             HeaderValue::from_static("no-referrer"),
         ))
-        .layer(TraceLayer::new_for_http())
-        // Reads are intentionally public (personal poster wall); writes still
-        // require the X-API-Key header, which CORS preflight blocks cross-origin.
-        .layer(CorsLayer::permissive())
+        // Do not log request URIs: diary search queries may contain private text.
+        .layer(TraceLayer::new_for_http().make_span_with(
+            |request: &Request| tracing::debug_span!("http", method = %request.method()),
+        ))
         .with_state(state)
+}
+
+async fn private_response(request: Request, next: middleware::Next) -> Response {
+    let mut response = next.run(request).await;
+    if response.status() == StatusCode::METHOD_NOT_ALLOWED {
+        response = (
+            StatusCode::METHOD_NOT_ALLOWED,
+            axum::Json(error::error_envelope("method not allowed")),
+        )
+            .into_response();
+    }
+    response
+        .headers_mut()
+        .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    response
 }

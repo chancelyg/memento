@@ -3,4 +3,6 @@
 *.db-shm
 *.db-wal
 .env
+.env.development
+.env.production
 /.claude/

@@ -263,7 +263,7 @@ mod tests {
     #[test]
     fn detect_mime_gif() {
         // "GIF8" prefix (covers GIF87a and GIF89a).
-        let bytes = [b'G', b'I', b'F', b'8', b'9', b'a'];
+        let bytes = *b"GIF89a";
         assert_eq!(detect_image_mime(&bytes).unwrap(), "image/gif");
     }
 

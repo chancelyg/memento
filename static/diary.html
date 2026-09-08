@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="referrer" content="no-referrer" />
+  <title>日记 · memento</title>
+  <link rel="stylesheet" href="/static/diary.css" />
+  <script src="/static/diary.js" defer></script>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/">memento <span>/ 海报墙</span></a>
+    <div id="account" hidden><span id="accountName"></span><button id="logout" type="button" data-write>退出登录</button></div>
+  </header>
+  <main>
+    <header class="hero"><p class="eyebrow">PRIVATE JOURNAL</p><h1>把日子留下来。</h1><p>只属于你的文字，一篇接着一篇。</p></header>
+    <p id="notice" role="status" aria-live="polite">正在检查登录状态…</p>
+    <section id="loginPanel" class="panel narrow" hidden aria-labelledby="loginTitle">
+      <h2 id="loginTitle">登录日记</h2>
+      <p class="muted">登录后才能阅读与书写。草稿仅保留在当前页面，关闭或刷新会丢失。</p>
+      <form id="loginForm">
+        <label for="username">用户名</label><input id="username" name="username" autocomplete="username" value="admin" required />
+        <label for="password">密码</label><input id="password" name="password" type="password" autocomplete="current-password" required />
+        <p id="loginError" class="error" role="alert"></p>
+        <button class="primary" id="loginButton" type="submit">下一步：验证身份</button>
+      </form>
+      <form id="totpForm" hidden aria-labelledby="totpTitle">
+        <h3 id="totpTitle">第二步：验证码</h3>
+        <p id="totpHelp" class="muted">请输入验证器中的 6 位验证码。验证请求有效期为 5 分钟，最多允许 5 次错误；过期或次数用尽后，请返回上一步重新验证密码。</p>
+        <label for="code">验证码</label><input id="code" name="code" type="text" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" minlength="6" maxlength="6" aria-describedby="totpHelp" required />
+        <p id="totpError" class="error" role="alert"></p>
+        <div class="actions"><button id="backToPassword" type="button">返回上一步</button><button class="primary" id="totpButton" type="submit">验证并登录</button></div>
+      </form>
+    </section>
+    <div id="workspace" hidden>
+      <section class="panel" aria-labelledby="createTitle">
+        <p class="eyebrow">NEW ENTRY</p><h2 id="createTitle">写下一篇</h2>
+        <p id="dateRule" class="muted">日期由服务端分配，不可编辑：没有未删除日记时为业务时区的今天，否则为未删除日记的最大日期加一天，允许未来日期。</p>
+        <form id="createForm">
+          <label for="newContent">日记正文</label><textarea id="newContent" rows="7" aria-describedby="dateRule newCount" placeholder="今天，有什么值得记住？"></textarea>
+          <div class="actions"><span id="newCount" class="muted">0 / 10000 字符</span><button class="primary" type="submit" data-write>创建日记</button></div>
+          <p id="createError" class="error" role="alert"></p>
+        </form>
+      </section>
+      <section id="editor" class="panel" hidden aria-labelledby="editTitle">
+        <h2 id="editTitle" tabindex="-1">编辑日记</h2><p id="editDate" class="muted"></p>
+        <form id="editForm">
+          <label for="editContent">编辑正文</label><textarea id="editContent" rows="10" aria-describedby="editCount"></textarea>
+          <p id="editCount" class="muted"></p>
+          <p id="editError" class="error" role="alert"></p>
+          <div id="conflict" hidden>
+            <p>请先读取最新版本并对照。读取不会覆盖你的草稿；确认后才会采用新版本号。</p>
+            <button id="refreshVersion" type="button" data-write>读取最新版本</button>
+            <div id="latestPanel" hidden><h3>服务端最新正文</h3><p id="latestContent" class="entry-content"></p><button id="acceptVersion" type="button" data-write>已对照，保留草稿并采用此版本号</button></div>
+          </div>
+          <div class="actions"><button id="cancelEdit" type="button" data-write>取消编辑</button><button id="saveEdit" class="primary" type="submit" data-write>保存修改</button></div>
+        </form>
+      </section>
+      <section class="archive" aria-labelledby="archiveTitle">
+        <div class="section-heading"><h2 id="archiveTitle" tabindex="-1">过往日记</h2><span class="muted">每页 24 篇</span></div>
+        <form id="filterForm" class="filters" role="search">
+          <div class="query"><label for="query">搜索正文</label><input id="query" type="search" name="q" placeholder="寻找一段记忆" /></div>
+          <div><label for="startDate">开始日期</label><input id="startDate" type="date" name="start_date" /></div>
+          <div><label for="endDate">结束日期</label><input id="endDate" type="date" name="end_date" /></div>
+          <div><label for="sort">日期排序</label><select id="sort" name="sort"><option value="desc">由新到旧</option><option value="asc">由旧到新</option></select></div>
+          <button type="submit">筛选</button><button id="resetFilters" type="button">重置</button>
+        </form>
+        <p id="listError" class="error" role="alert"></p>
+        <button id="retryList" type="button" hidden>重试加载</button>
+        <p id="listStatus" class="muted" role="status"></p>
+        <div id="entries" aria-busy="false"></div>
+        <nav class="pagination" aria-label="日记分页"><button id="previous" type="button" disabled>上一页</button><span id="pageInfo">第 1 页</span><button id="next" type="button" disabled>下一页</button></nav>
+      </section>
+    </div>
+    <noscript><p class="error">日记页面需要启用 JavaScript。</p></noscript>
+  </main>
+</body>
+</html>

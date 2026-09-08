@@ -1,5 +1,6 @@
 //! HTTP handler modules.
 
+pub mod diary;
 pub mod favorites;
 pub mod images;
 

@@ -2,10 +2,59 @@
 
 use std::env;
 
+use crate::error::{AppError, AppResult};
 use rand::Rng;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Environment {
+    Development,
+    Production,
+}
+
+impl Environment {
+    pub fn from_env() -> AppResult<Self> {
+        match env::var("MEMENTO_ENV") {
+            Err(env::VarError::NotPresent) => Ok(Self::Production),
+            Ok(value) if value == "development" => Ok(Self::Development),
+            Ok(value) if value == "production" => Ok(Self::Production),
+            _ => Err(AppError::BadRequest(
+                "MEMENTO_ENV must be development or production".into(),
+            )),
+        }
+    }
+}
+
+pub fn load_environment_file() -> AppResult<()> {
+    let directory = env::current_dir()
+        .map_err(|_| AppError::BadRequest("cannot access working directory".into()))?;
+    load_environment_file_in(&directory).map(|_| ())
+}
+
+fn load_environment_file_in(directory: &std::path::Path) -> AppResult<Environment> {
+    let selected = Environment::from_env()?;
+    let filename = match selected {
+        Environment::Development => ".env.development",
+        Environment::Production => ".env.production",
+    };
+    match dotenvy::from_path(directory.join(filename)) {
+        Ok(()) => {}
+        Err(dotenvy::Error::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(_) => {
+            return Err(AppError::BadRequest(
+                "cannot load selected environment file".into(),
+            ))
+        }
+    }
+    if Environment::from_env()? != selected {
+        return Err(AppError::BadRequest(
+            "environment file must not change MEMENTO_ENV".into(),
+        ));
+    }
+    Ok(selected)
+}
+
 /// Default listen address.
-const DEFAULT_BIND: &str = "0.0.0.0:23457";
+const DEFAULT_BIND: &str = "127.0.0.1:23457";
 /// Default SQLite database path.
 const DEFAULT_DB_PATH: &str = "./memento.db";
 /// Length (in bytes) of a generated ephemeral API key before hex-encoding.
@@ -89,12 +138,24 @@ impl Config {
         let db_path = env::var("MEMENTO_DB_PATH")
             .ok()
             .filter(|s| !s.trim().is_empty())
-            .unwrap_or_else(|| DEFAULT_DB_PATH.to_string());
+            .unwrap_or_else(|| {
+                if env::var("MEMENTO_ENV").as_deref() == Ok("development") {
+                    "./memento.dev.db".into()
+                } else {
+                    DEFAULT_DB_PATH.to_string()
+                }
+            });
 
         let bind = env::var("MEMENTO_BIND")
             .ok()
             .filter(|s| !s.trim().is_empty())
-            .unwrap_or_else(|| DEFAULT_BIND.to_string());
+            .unwrap_or_else(|| {
+                if env::var("MEMENTO_ENV").as_deref() == Ok("development") {
+                    "0.0.0.0:23457".into()
+                } else {
+                    DEFAULT_BIND.to_string()
+                }
+            });
 
         Self {
             api_key,
@@ -150,6 +211,7 @@ mod tests {
     static ENV_LOCK: Mutex<()> = Mutex::new(());
 
     fn clear_env() {
+        env::remove_var("MEMENTO_ENV");
         env::remove_var("MEMENTO_API_KEY");
         env::remove_var("MEMENTO_DB_PATH");
         env::remove_var("MEMENTO_BIND");
@@ -240,6 +302,80 @@ mod tests {
         );
         assert_eq!(cfg.bind, DEFAULT_BIND, "blank bind falls back to default");
 
+        clear_env();
+    }
+
+    #[test]
+    fn environment_files_are_isolated_and_system_values_win() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        clear_env();
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join(".env"), "MEMENTO_SITE_NAME=wrong-common\n").unwrap();
+        std::fs::write(
+            dir.path().join(".env.development"),
+            "MEMENTO_ENV=development\nMEMENTO_SITE_NAME=dev\nMEMENTO_BIND=0.0.0.0:12345\n",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.path().join(".env.production"),
+            "MEMENTO_ENV=production\nMEMENTO_SITE_NAME=prod\n",
+        )
+        .unwrap();
+        assert_eq!(
+            load_environment_file_in(dir.path()).unwrap(),
+            Environment::Production
+        );
+        assert_eq!(env::var("MEMENTO_SITE_NAME").unwrap(), "prod");
+        assert!(env::var("MEMENTO_BIND").is_err());
+        clear_env();
+        env::set_var("MEMENTO_ENV", "development");
+        env::set_var("MEMENTO_SITE_NAME", "system");
+        assert_eq!(
+            load_environment_file_in(dir.path()).unwrap(),
+            Environment::Development
+        );
+        assert_eq!(env::var("MEMENTO_SITE_NAME").unwrap(), "system");
+        assert_eq!(Config::from_env().bind, "0.0.0.0:12345");
+        clear_env();
+    }
+
+    #[test]
+    fn environment_rejects_invalid_modes_and_does_not_search_parent_files() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        clear_env();
+        let dir = tempfile::tempdir().unwrap();
+        let child = dir.path().join("child");
+        std::fs::create_dir(&child).unwrap();
+        std::fs::write(
+            dir.path().join(".env.production"),
+            "MEMENTO_SITE_NAME=parent\n",
+        )
+        .unwrap();
+        assert_eq!(
+            load_environment_file_in(&child).unwrap(),
+            Environment::Production
+        );
+        assert!(env::var("MEMENTO_SITE_NAME").is_err());
+        env::set_var("MEMENTO_ENV", "staging");
+        assert!(load_environment_file_in(&child).is_err());
+        clear_env();
+        std::fs::write(child.join(".env.production"), "MEMENTO_ENV=development\n").unwrap();
+        assert!(load_environment_file_in(&child).is_err());
+        clear_env();
+    }
+
+    #[test]
+    fn environment_file_errors_do_not_echo_contents() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        clear_env();
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join(".env.production"),
+            "invalid secret marker \"\n",
+        )
+        .unwrap();
+        let error = load_environment_file_in(dir.path()).unwrap_err();
+        assert!(!error.to_string().contains("secret marker"));
         clear_env();
     }
 }

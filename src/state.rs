@@ -9,6 +9,10 @@ use crate::db::DbPool;
 /// counted).
 #[derive(Clone)]
 pub struct AppState {
+    /// Browser sessions never substitute for an external API key.
+    pub browser: Arc<crate::browser::BrowserAuth>,
+    /// Only the first diary uses today's date in this business timezone.
+    pub diary_timezone: chrono_tz::Tz,
     /// SQLite connection pool.
     pub pool: DbPool,
     /// Write-auth API key.
@@ -21,6 +25,8 @@ impl AppState {
     /// Construct new state with default site display config.
     pub fn new(pool: DbPool, api_key: String) -> Self {
         Self {
+            browser: Arc::new(crate::browser::BrowserAuth::disabled()),
+            diary_timezone: chrono_tz::Asia::Shanghai,
             pool,
             api_key: Arc::new(api_key),
             site: Arc::new(SiteConfig::default()),
@@ -32,6 +38,20 @@ impl AppState {
     pub fn with_site(self, site: SiteConfig) -> Self {
         Self {
             site: Arc::new(site),
+            ..self
+        }
+    }
+
+    pub fn with_browser(self, browser: crate::browser::BrowserAuth) -> Self {
+        Self {
+            browser: Arc::new(browser),
+            ..self
+        }
+    }
+
+    pub fn with_diary_timezone(self, diary_timezone: chrono_tz::Tz) -> Self {
+        Self {
+            diary_timezone,
             ..self
         }
     }

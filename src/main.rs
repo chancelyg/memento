@@ -7,10 +7,21 @@ use std::process::ExitCode;
 
 #[tokio::main]
 async fn main() -> ExitCode {
-    // Load a local `.env` (if present) into the process environment before any
-    // config is read, so a packaged binary picks up `.env` next to it. Existing
-    // environment variables take precedence; a missing file is not an error.
-    let _ = dotenvy::dotenv();
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if !args.is_empty() {
+        return match memento::cli::execute(&args) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(error) => {
+                eprintln!("{error}");
+                ExitCode::FAILURE
+            }
+        };
+    }
+    // Load only the selected environment file from this working directory.
+    if let Err(error) = memento::config::load_environment_file() {
+        eprintln!("{error}");
+        return ExitCode::FAILURE;
+    }
 
     memento::init_tracing();
 
