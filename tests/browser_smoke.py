@@ -75,11 +75,12 @@ def main():
         port = listener.getsockname()[1]
     origin = "http://127.0.0.1:" + str(port)
     with tempfile.TemporaryDirectory(prefix="memento-browser-") as directory:
+        settings_path = Path(directory) / "settings.yaml"
         env = {}
         env.update(MEMENTO_DB_PATH=directory + "/test.db", MEMENTO_BIND="127.0.0.1:" + str(port),
                    MEMENTO_ENV="development", MEMENTO_PASSWORD_HASH=hashed,
                    MEMENTO_TOTP_SECRET=totp_secret, MEMENTO_SESSION_TTL_DAYS="7",
-                   RUST_LOG="warn")
+                   MEMENTO_CONFIG_PATH=str(settings_path), RUST_LOG="warn")
         process = subprocess.Popen([str(BINARY)], cwd=directory, env=env,
                                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
         try:
@@ -94,30 +95,50 @@ def main():
             else:
                 raise AssertionError("temporary server did not start")
             browser("open", origin + "/diary")
-            wait('!document.getElementById("loginPanel").hidden')
+            wait('location.pathname==="/login" && location.search==="?next=%2Fdiary" && !document.getElementById("loginForm").hidden')
             assert evaluate('(async()=>((await fetch("/api/diaries",{headers:{"X-API-Key":"not-configured"}})).status===401))()')
-            assert evaluate('document.getElementById("username").value==="admin" && document.getElementById("totpForm").hidden && document.getElementById("workspace").hidden')
+            wait('document.getElementById("shellAccount").textContent==="登录"')
+            assert evaluate('document.getElementById("username").value==="admin" && document.getElementById("totpForm").hidden && document.getElementById("shellAccount").getAttribute("href")==="/login"')
             browser("fill", "#password", password)
             browser("click", "#loginButton")
             wait('!document.getElementById("totpForm").hidden')
-            assert evaluate('document.getElementById("workspace").hidden && document.getElementById("account").hidden && document.getElementById("entries").children.length===0 && document.getElementById("loginForm").hidden && document.getElementById("password").value===""')
+            assert evaluate('document.getElementById("loginForm").hidden && document.getElementById("password").value===""')
             assert evaluate('(async()=> (await fetch("/session")).status===401 && (await fetch("/private/diaries")).status===401)()')
             assert evaluate('(()=>{const c=document.getElementById("code");return c.type==="text" && c.inputMode==="numeric" && c.autocomplete==="one-time-code" && c.maxLength===6})()')
             browser("set", "viewport", "390", "844")
             assert evaluate('document.documentElement.scrollWidth<=window.innerWidth')
             browser("fill", "#code", "000001")
             browser("click", "#backToPassword")
-            assert evaluate('!document.getElementById("loginForm").hidden && document.getElementById("totpForm").hidden && document.getElementById("code").value==="" && document.getElementById("password").value==="" && document.getElementById("workspace").hidden')
+            assert evaluate('!document.getElementById("loginForm").hidden && document.getElementById("totpForm").hidden && document.getElementById("code").value==="" && document.getElementById("password").value===""')
             browser("fill", "#password", password)
             browser("click", "#loginButton")
             wait('!document.getElementById("totpForm").hidden')
-            assert evaluate('document.getElementById("workspace").hidden')
             browser("fill", "#code", totp(totp_secret))
             browser("click", "#totpButton")
-            wait('!document.getElementById("workspace").hidden && document.getElementById("entries").getAttribute("aria-busy")==="false"')
-            assert evaluate('document.getElementById("code").value==="" && document.getElementById("password").value===""')
+            wait('location.pathname==="/diary" && !document.getElementById("workspace").hidden && document.getElementById("entries").getAttribute("aria-busy")==="false"')
+            wait('document.getElementById("shellAccount").textContent==="管理"')
+            assert evaluate('document.getElementById("shellAccount").getAttribute("href")==="/admin"')
             browser("set", "viewport", "1280", "900")
             print("PASS release assets and development password + TOTP browser login")
+
+            browser("click", "#shellAccount")
+            wait('location.pathname==="/admin" && !document.getElementById("settingsForm").hidden')
+            browser("fill", "#siteName", "Synthetic Memento")
+            browser("fill", "#siteSlogan", "Synthetic browser smoke")
+            browser("click", "#saveSettings")
+            wait('document.getElementById("adminStatus").textContent.includes("已保存")')
+            assert settings_path.is_file(), "settings YAML must stay in the temporary directory"
+            browser("click", ".site-brand")
+            wait('location.pathname==="/" && document.querySelector(".site-brand__name").textContent==="Synthetic Memento"')
+            wait('document.getElementById("shellAccount").textContent==="管理"')
+            assert evaluate('document.title==="Synthetic Memento" && document.querySelector(".hero__subtitle").textContent==="Synthetic browser smoke" && document.getElementById("shellAccount").getAttribute("href")==="/admin" && document.querySelector("input[type=search]")===null')
+            browser("set", "viewport", "390", "844")
+            assert evaluate('(()=>{const n=document.querySelector(".site-nav"),r=n.getBoundingClientRect();return n.scrollWidth<=n.clientWidth && r.left>=0 && r.right<=innerWidth && document.documentElement.scrollWidth<=innerWidth})()')
+            print("PASS isolated site settings, live home template and narrow shared navigation")
+
+            browser("open", origin + "/diary")
+            wait('!document.getElementById("workspace").hidden && document.getElementById("entries").getAttribute("aria-busy")==="false"')
+            browser("set", "viewport", "1280", "900")
 
             browser("fill", "#newContent", 'synthetic <img src=x onerror="window.__xss=1"> 😀')
             browser("click", '#createForm button[type="submit"]')
@@ -171,8 +192,8 @@ def main():
             wait('document.getElementById("entries").getAttribute("aria-busy")==="true"')
             assert evaluate('!document.getElementById("logout").disabled')
             browser("click", "#logout")
-            wait('!document.getElementById("loginPanel").hidden')
-            assert evaluate('(async()=>({ok:(await window.__realFetch("/session")).status===401 && document.getElementById("workspace").hidden}))()')["ok"]
+            wait('location.pathname==="/login" && location.search==="?next=%2Fdiary" && !document.getElementById("loginForm").hidden')
+            assert evaluate('(async()=>({ok:(await fetch("/session")).status===401}))()')["ok"]
             print("PASS pending-list cancellation and persisted logout")
         finally:
             try:

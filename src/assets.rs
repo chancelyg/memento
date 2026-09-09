@@ -7,7 +7,7 @@ use axum::{
 };
 use rust_embed::RustEmbed;
 
-use crate::config::SiteConfig;
+use crate::settings::SiteSettings;
 use crate::state::AppState;
 
 /// Compile-time embedded contents of the `static/` directory.
@@ -16,14 +16,29 @@ use crate::state::AppState;
 pub struct StaticAssets;
 
 /// The diary shell contains no private data; all content is fetched after login.
-pub async fn diary_handler() -> Response {
-    serve_embedded("diary.html")
+pub async fn diary_handler(State(state): State<AppState>) -> Response {
+    render_handler(state, "diary.html")
+}
+
+/// The login shell contains no credentials or session data.
+pub async fn login_handler(State(state): State<AppState>) -> Response {
+    render_handler(state, "login.html")
+}
+
+/// The admin shell contains no private settings; they are fetched after login.
+pub async fn admin_handler(State(state): State<AppState>) -> Response {
+    render_handler(state, "admin.html")
 }
 
 /// Serve `index.html` at `/`, injecting the operator-configured site name,
 /// slogan and favicon into the template placeholders.
 pub async fn index_handler(State(state): State<AppState>) -> Response {
-    match render_index(&state.site) {
+    render_handler(state, "index.html")
+}
+
+fn render_handler(state: AppState, path: &str) -> Response {
+    let site = state.settings.snapshot().site;
+    match render_page(path, &site) {
         Some(html) => (
             StatusCode::OK,
             [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
@@ -34,10 +49,10 @@ pub async fn index_handler(State(state): State<AppState>) -> Response {
     }
 }
 
-/// Render `index.html` with site-config placeholders substituted. Returns
+/// Render an HTML page with site-config placeholders substituted. Returns
 /// `None` only if the asset is missing or not valid UTF-8 (a build error).
-fn render_index(site: &SiteConfig) -> Option<String> {
-    let asset = StaticAssets::get("index.html")?;
+fn render_page(path: &str, site: &SiteSettings) -> Option<String> {
+    let asset = StaticAssets::get(path)?;
     let template = std::str::from_utf8(&asset.data).ok()?;
     Some(
         template
@@ -108,7 +123,7 @@ mod tests {
 
     #[test]
     fn render_index_substitutes_defaults() {
-        let html = render_index(&SiteConfig::default()).expect("renders");
+        let html = render_page("index.html", &SiteSettings::default()).expect("renders");
         assert!(!html.contains("{{SITE_NAME}}"));
         assert!(!html.contains("{{SLOGAN}}"));
         assert!(!html.contains("{{ICON}}"));
@@ -118,12 +133,12 @@ mod tests {
 
     #[test]
     fn render_index_substitutes_custom_values() {
-        let site = SiteConfig {
+        let site = SiteSettings {
             name: "老王的收藏".to_string(),
             slogan: "随心记录".to_string(),
             icon: "https://example.com/f.png".to_string(),
         };
-        let html = render_index(&site).expect("renders");
+        let html = render_page("index.html", &site).expect("renders");
         assert!(html.contains("老王的收藏"));
         assert!(html.contains("随心记录"));
         assert!(html.contains("https://example.com/f.png"));
@@ -138,5 +153,15 @@ mod tests {
     fn escape_attr_keeps_angle_brackets() {
         // Inline SVG data URIs rely on `<`/`>` surviving in the attribute.
         assert_eq!(escape_attr("<svg>&\""), "<svg>&amp;&quot;");
+    }
+
+    #[test]
+    fn all_dynamic_page_templates_have_site_placeholders() {
+        for path in ["index.html", "diary.html", "login.html", "admin.html"] {
+            let html = render_page(path, &SiteSettings::default()).expect("renders");
+            assert!(!html.contains("{{SITE_NAME}}"), "{path}");
+            assert!(!html.contains("{{SLOGAN}}"), "{path}");
+            assert!(!html.contains("{{ICON}}"), "{path}");
+        }
     }
 }

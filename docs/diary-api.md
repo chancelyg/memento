@@ -1,6 +1,6 @@
 # 日记与浏览器 Session 接口
 
-本文记录双环境、bcrypt/TOTP 与可选 If-Match 的接口契约，对应实现位于 `src/lib.rs`、`src/handlers/diary.rs`、`src/diary.rs`、`src/browser.rs`。[设计](diary-design.md) 说明 schema v3 防重用决策，[运维](diary-operations.md) 说明配置、迁移和验证范围。所有示例正文、日期和 ID 均为虚构。
+本文记录双环境、bcrypt/TOTP 与可选 If-Match 的接口契约，对应实现位于 `src/lib.rs`、`src/handlers/diary.rs`、`src/diary.rs`、`src/browser.rs`。[设计](diary-design.md) 说明 schema v3 防重用决策，[管理后台设计](admin-settings-design.md) 说明站点设置契约，[运维](diary-operations.md) 说明配置、迁移和验证范围。所有示例正文、日期和 ID 均为虚构。
 
 ## 两组日记路由
 
@@ -115,6 +115,8 @@ POST 无幂等键，也不按正文去重。超时不能证明未写入；先用
 
 `/session` 仅供本应用浏览器使用，不是 Agent 登录入口。浏览器自动同源携带 cookie 和写请求 Origin，脚本从响应保存 CSRF token 到当前页面内存；不需要也不应把 API Key 写入页面。
 
+这是严格单用户协议：唯一浏览器账号就是管理员，配置用户名只会重命名该账号。多个有效 session 仅表示同一管理员在多台设备或多个浏览器登录，不创建用户、角色或 RBAC。
+
 两模式都必须配置 bcrypt `MEMENTO_PASSWORD_HASH`、Base32 `MEMENTO_TOTP_SECRET`（解码至少 20 字节），用户名默认 admin。CLI hash-password（含 --stdin）采用 DEFAULT_COST=12，密码非空且至多 72 UTF-8 字节，防截断、不另设至少 12 字符规则；旧 Argon2 hash 须重生，不改业务数据。TOTP 使用 6 位数字字符串（保留前导零）、SHA1、30 秒、前后各 1 时间步容差；用 totp-secret 本地生成新 20 字节 secret 并安全登记验证器，不依赖域名。
 
 development 不要求 Origin/Host 比对。production 必须显式 canonical HTTP(S) PUBLIC_ORIGIN，POST 两阶段和 DELETE 都要求精确单一 Origin，不从转发头猜测。两模式登录后的 unsafe 请求均保留 CSRF，由前端自动处理。生产 HTTP 内网反代可用，HTTPS 是公网推荐方案而非所有生产的硬约束。
@@ -134,12 +136,25 @@ TTL 配置只影响之后新建的会话，不重写已有会话的 `expires_at`
 
 schema v3 的 `browser_totp_state` 按 credential_hash 保存 last_used_step。OTP 成功时只允许比已使用值更大的时间步，和 session 插入在同一 IMMEDIATE 事务提交，失败一起回滚。前后各 1 步仍是时钟容差，**不是重复使用许可**：同一时间步的验证码不能跨 challenge、重启或注销重用，返回 401 时应等下一个验证码并重新从密码开始登录。若先接受了超前一步，须等比它更大的时间步；时钟回拨可能暂时拒绝。没有手动全局绕过开关，此表不是审计/账户平台。
 
+## 管理员站点设置
+
+`/admin` 是公开可加载但不含设置值的页面壳；脚本先检查 `/session`，无有效会话时跳到 `/login?next=%2Fadmin`。登录页只接受 `/diary` 或 `/admin` 作为 next，默认进入 `/admin`。`/`、`/diary`、`/login`、`/admin` 的账户入口也会通过 `/session` 在“登录”和“管理”之间切换。
+
+| 方法 | 条件与请求体 | 成功响应 |
+|---|---|---|
+| `GET /private/settings/site` | 有效管理员 cookie；不要求 CSRF | 200，`data: {name,slogan,icon}` |
+| `PUT /private/settings/site` | 有效 cookie 和该 session 的 `X-CSRF-Token`；production 另需精确 Origin；JSON body 最多 512 KiB | 200，返回 trim 后的完整 `{name,slogan,icon}` |
+
+API Key 不能替代 session。PUT 是完整站点设置替换，不是 PATCH：后台提交 `name`、`slogan`、`icon` 三字段，拒绝未知字段。`name` trim 后为 1..80 个 Unicode 标量值；`slogan` trim 后最多 200 个，可为空；`icon` 允许内置默认值、受限 HTTPS URL 或严格 base64 栅格图片 data URI，完整约束见[管理后台设计](admin-settings-design.md)。错误媒体类型返回 415，body 超限返回 413，JSON/字段/值错误返回 400；私有设置响应均为 `no-store`。写入响应未知时先 GET 核实，不要盲目重发。
+
+首页不再提供可见的收藏名称搜索控件，但公开 `GET /api/favorites` 的 `q` 参数仍保留；这不是 API 删除。日记页的正文/日期筛选也不受影响。
+
 ## 状态码速查
 
 | 状态码 | 含义 |
 |---|---|
 | 200 / 201 / 204 | 查询或编辑成功 / 创建成功 / 删除或退出成功 |
-| 400 | 查询、路径、JSON、正文或 If-Match 无效 |
+| 400 | 查询、路径、JSON、正文、站点字段或 If-Match 无效 |
 | 401 | key 错误/缺失；session 缺失、过期、撤销或配置失配；登录凭据错误、challenge 无效或 OTP 时间步已使用（等待下一个验证码） |
 | 403 | 浏览器 Origin 或 CSRF 不符合要求 |
 | 404 | 日记不存在或已软删除（前置校验通过后） |

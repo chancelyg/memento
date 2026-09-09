@@ -5,4 +5,8 @@
 .env
 .env.development
 .env.production
+/memento.development.yaml
+/memento.production.yaml
+/.memento.development.yaml.*.tmp
+/.memento.production.yaml.*.tmp
 /.claude/

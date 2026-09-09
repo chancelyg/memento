@@ -9,7 +9,6 @@
 
   /* ---------- Constants ---------- */
   var PER_PAGE = 24;
-  var THEME_KEY = "memento-theme";
 
   var TYPE_META = {
     game:  { label: "游戏", emoji: "🎮", cls: "badge--game",  accent: "rgba(74,110,220,0.30)" },
@@ -20,7 +19,6 @@
   /* ---------- State (replaced, not mutated) ---------- */
   var state = {
     type: "all",
-    q: "",
     page: 1,
     total: 0,
     loaded: 0,
@@ -32,10 +30,8 @@
   var $count      = document.getElementById("countLine");
   var $empty      = document.getElementById("emptyState");
   var $loadMore   = document.getElementById("loadMore");
-  var $search     = document.getElementById("searchInput");
   var $pills      = Array.prototype.slice.call(document.querySelectorAll(".pill"));
   var $toast      = document.getElementById("toast");
-  var $themeBtn   = document.getElementById("themeToggle");
 
   /* Modal refs */
   var $modal       = document.getElementById("modal");
@@ -106,15 +102,6 @@
     return (ex && typeof ex === "object") ? ex : {};
   }
 
-  function debounce(fn, wait) {
-    var t;
-    return function () {
-      var ctx = this, args = arguments;
-      clearTimeout(t);
-      t = setTimeout(function () { fn.apply(ctx, args); }, wait);
-    };
-  }
-
   function showToast(msg) {
     setText($toast, msg);
     $toast.hidden = false;
@@ -134,28 +121,6 @@
     if (!isFinite(score)) return 0;
     return Math.max(0, Math.min(1, score / 10));
   }
-
-  /* ============================================================
-     Theme toggle (persisted in localStorage)
-     ============================================================ */
-  function applyTheme(theme) {
-    document.documentElement.setAttribute("data-theme", theme);
-    var icon = $themeBtn.querySelector(".theme-toggle__icon");
-    if (icon) icon.textContent = theme === "light" ? "☀️" : "🌙";
-    $themeBtn.setAttribute("aria-pressed", theme === "light" ? "true" : "false");
-  }
-
-  function initTheme() {
-    var saved;
-    try { saved = localStorage.getItem(THEME_KEY); } catch (e) { saved = null; }
-    applyTheme(saved === "light" ? "light" : "dark");
-  }
-
-  $themeBtn.addEventListener("click", function () {
-    var next = document.documentElement.getAttribute("data-theme") === "light" ? "dark" : "light";
-    applyTheme(next);
-    try { localStorage.setItem(THEME_KEY, next); } catch (e) { /* ignore */ }
-  });
 
   /* ============================================================
      Lazy image loading via IntersectionObserver
@@ -461,7 +426,6 @@
     params.set("type", state.type);
     params.set("page", String(state.page));
     params.set("per_page", String(PER_PAGE));
-    if (state.q) params.set("q", state.q);
     return "/api/favorites?" + params.toString();
   }
 
@@ -566,22 +530,10 @@
       $pills.forEach(function (p) {
         var active = p === pill;
         p.classList.toggle("is-active", active);
-        p.setAttribute("aria-selected", active ? "true" : "false");
+        p.setAttribute("aria-pressed", active ? "true" : "false");
       });
       fetchPage(true);
     });
-  });
-
-  var onSearch = debounce(function () {
-    var q = $search.value.trim();
-    if (q === state.q) return;
-    state.q = q;
-    fetchPage(true);
-  }, 320);
-  $search.addEventListener("input", onSearch);
-  $search.addEventListener("search", function () {
-    state.q = $search.value.trim();
-    fetchPage(true);
   });
 
   $loadMore.addEventListener("click", function () {
@@ -593,6 +545,5 @@
   /* ============================================================
      Init
      ============================================================ */
-  initTheme();
   fetchPage(true);
 })();

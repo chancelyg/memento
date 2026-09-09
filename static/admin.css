@@ -1,0 +1,59 @@
+.account-main {
+  width: min(100%, 1040px);
+  margin: 0 auto;
+  padding: 64px 24px 96px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 480px);
+  gap: clamp(32px, 7vw, 88px);
+  align-items: start;
+}
+.account-intro { padding-top: 34px; }
+.eyebrow { margin: 0 0 12px; color: var(--accent); font-size: .76rem; letter-spacing: .24em; }
+h1, h2, h3 { font-family: var(--serif); line-height: 1.25; }
+h1 { margin: 0 0 18px; font-size: clamp(2.5rem, 7vw, 4.8rem); font-weight: 500; }
+h2 { margin: 0 0 10px; font-size: 1.65rem; }
+h3 { margin: 8px 0; font-size: 1.2rem; }
+.account-intro > p:last-child, .muted { color: var(--muted); }
+.form-card {
+  min-width: 0;
+  padding: 30px;
+  border: 1px solid var(--glass-border-strong);
+  border-radius: var(--radius);
+  background: var(--glass-strong);
+  box-shadow: var(--shadow);
+}
+label { display: block; margin: 16px 0 6px; font-size: .9rem; }
+input, button { font: inherit; }
+input {
+  width: 100%;
+  min-width: 0;
+  padding: 11px 12px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  color: var(--text);
+  background: var(--bg-2);
+}
+#code { font-variant-numeric: tabular-nums; letter-spacing: .3em; }
+.form-card button {
+  min-height: 44px;
+  padding: 9px 16px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  color: var(--text);
+  background: var(--glass);
+}
+.form-card button:hover:not(:disabled) { border-color: var(--accent); }
+.form-card button:disabled { opacity: .5; cursor: not-allowed; }
+.form-card .primary { color: var(--bg); background: var(--accent); font-weight: 650; }
+.actions { margin-top: 18px; display: flex; justify-content: flex-end; gap: 12px; flex-wrap: wrap; }
+.error { color: var(--danger); overflow-wrap: anywhere; }
+.error:empty { display: none; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+body[data-page="admin"] .site-account,
+body[data-page="login"] .site-account { color: var(--text); background: var(--accent-soft); }
+
+@media (max-width: 760px) {
+  .account-main { grid-template-columns: 1fr; padding: 38px 16px 64px; }
+  .account-intro { padding-top: 0; }
+  .form-card { padding: 24px 18px; }
+}

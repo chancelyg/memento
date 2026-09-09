@@ -1,23 +1,25 @@
 # memento
 
-电影 / 游戏 / 图书三合一的个人海报墙，另提供浏览器登录和私有日记。Rust 单文件二进制交付 release 前端，数据保存在外部 SQLite；收藏读取公开，日记读写均需鉴权。
+电影 / 游戏 / 图书三合一的个人海报墙，另提供严格单用户的浏览器登录、私有日记和站点管理。Rust 单文件二进制交付 release 前端，业务数据保存在外部 SQLite；收藏读取公开，日记读写均需鉴权。
 
-数据存在本地 SQLite 文件里（含海报图片本身），不打包进可执行文件。release 前端静态资源内嵌进二进制，部署还需配置和可持久化的数据目录。新增、修改收藏都通过 HTTP API 完成，方便由脚本、Telegram 机器人或 agent 提交。
+收藏、海报、日记和 session 存在本地 SQLite 文件里，不打包进可执行文件；管理员可编辑的非秘密功能设置单独保存在 YAML。release 前端静态资源内嵌进二进制，部署还需配置和可持久化的数据目录。新增、修改收藏都通过 HTTP API 完成，方便由脚本、Telegram 机器人或 agent 提交。
 
 特性：
 
-- 三种类型（电影、游戏、图书）共用一面墙，支持按类型过滤、按名称搜索、分页。
+- 三种类型（电影、游戏、图书）共用一面墙，网页支持按类型过滤和分页；公开 API 继续支持按名称搜索。
 - 单文件二进制：SQLite 经 `rusqlite` bundled feature 编译，无系统依赖；前端经 `rust-embed` 内嵌。
 - 收藏读接口公开，收藏写接口（POST / PUT / DELETE / 上传图片）需 `X-API-Key`；日记 API 的读写都需要 key。
 - 海报图片支持三种入库方式：base64、由服务端抓取的 URL、直接上传字节。
 - 暗色前端，含详情弹窗、懒加载、明暗主题切换。
 - `/diary` 提供同源浏览器登录和日记创建、筛选、编辑、软删除；浏览器使用 session cookie，不使用 API Key。删除后不再显示，但正文仍保留在数据库中，本期无恢复、回收站或永久清除 API；收藏保持硬删除，二者均不承诺安全擦除。
+- `/admin` 供同一个浏览器管理员修改站点名称、标语和图标，保存到版本化 YAML；不在后台展示或修改密码、TOTP、API Key 等秘密。
 
 ### 日记文档
 
 - [设计说明](docs/diary-design.md)：日期编排、权限隔离、session、安全边界与迁移决策。
 - [接口文档](docs/diary-api.md)：Agent `/api/diaries`、浏览器 `/private/diaries` 和 `/session`，分页、ETag、If-Match 及错误处理。
 - [部署与迁移](docs/diary-operations.md)：双环境配置、bcrypt/TOTP 设置、HTTP 内网反代与可选 HTTPS、旧库 dry-run/apply、一致备份与回滚和验证入口；不代表生产已迁移或上线。
+- [管理后台与 YAML 设置](docs/admin-settings-design.md)：严格单用户边界、配置分层、站点字段、后台接口、原子保存及跨平台限制。
 
 没有未删除日记时，新篇取业务时区今天（默认 `Asia/Shanghai`），否则按未删除日记的最大日期加一天；删除末篇后可能重用日期，这是预期行为。全部软删不代表物理空表。编辑仅允许正文，PATCH/DELETE 的 `If-Match` 可选：不传操作最新记录，提供时格式错误返回 400、未删除记录版本过时返回 412；不再因缺头返回 428。网页仍带版本防冲突，不自动合并。已删除 ID 在前置校验通过后返回 404。当前单个 API Key 同时拥有收藏写权限和全部日记读写权限，不能细分授权。
 
@@ -31,13 +33,15 @@ chmod +x memento
 
 ./memento hash-password
 ./memento totp-secret
-# 在受保护的 .env.production 中填写生成的 hash、secret 和外部 origin 后启动
+# 在受保护的 .env.production 中填写生成的 hash、secret、外部 origin 和持久化路径后启动
 MEMENTO_ENV=production ./memento
 ```
 
 无参数 server 启动先由系统 `MEMENTO_ENV` 选择模式，只接受 `development` 或 `production`，未设置默认 `production`。仅从进程 cwd 加载选定的 `.env.development` 或 `.env.production`，不加载通用 `.env`、不向父目录查找；已有系统环境优先，文件内不能切换模式。CLI `hash-password`、`totp-secret`、`init-db` 不加载任何 dotenv 文件。
 
-未设置或仅含空白的 `MEMENTO_API_KEY` 会禁用全部外部 key 鉴权接口（收藏写入、日记 API、`/api/auth/verify`），启动日志只提示禁用，不输出密钥；收藏公开读取不受影响，浏览器日记可独立使用。需要 Agent/API 访问时显式设置固定强 key。
+server 还会读取 `MEMENTO_CONFIG_PATH` 指向的 YAML：development 默认 `./memento.development.yaml`，production 默认 `./memento.production.yaml`，相对进程 cwd。首次缺失时创建，父目录必须已存在；Unix 新文件为 0600。既有 YAML 无效时拒绝启动且不覆盖。CLI 不读取 YAML。
+
+未设置或仅含空白的 `MEMENTO_API_KEY` 会禁用全部外部 key 鉴权接口（收藏写入、日记 API、`/api/auth/verify`），启动日志只提示禁用，不输出密钥；收藏公开读取不受影响，浏览器日记和管理后台可独立使用。需要 Agent/API 访问时显式设置固定强 key。
 
 ### 最短内网登录
 
@@ -50,7 +54,7 @@ cargo run -- totp-secret
 MEMENTO_ENV=development cargo run
 ```
 
-开发示例监听 `0.0.0.0:23457`、数据库 `./memento.dev.db`，访问 `http://<机器内网IP>:23457/diary`；`0.0.0.0` 不是访问 URL。默认账号 `admin`，每次登录均先校验密码，再输入 TOTP。hash 用单引号包围，避免 `$` 插值；不把密码或 TOTP secret 写入命令参数、日志或 Git。二进制开发启动对应 `MEMENTO_ENV=development ./memento`。
+开发示例监听 `0.0.0.0:23457`、数据库 `./memento.dev.db`、设置文件 `./memento.development.yaml`，访问 `http://<机器内网IP>:23457/diary`；`0.0.0.0` 不是访问 URL。默认账号 `admin`，每次登录均先校验密码，再输入 TOTP。它是唯一管理员账号，多 session 仅用于同一管理员的多设备/浏览器，不是多用户或 RBAC。hash 用单引号包围，避免 `$` 插值；不把密码或 TOTP secret 写入命令参数、日志或 Git。二进制开发启动对应 `MEMENTO_ENV=development ./memento`。
 
 开发模式不要求 Origin/Host 比对，Cookie 为 HttpOnly、SameSite=Lax、无 Secure。生产模式必须显式配置 canonical HTTP(S) `MEMENTO_PUBLIC_ORIGIN`，浏览器 unsafe 请求精确校验 Origin，Cookie 为 HttpOnly、SameSite=Strict；HTTPS origin 才带 Secure。两模式都要求密码 + TOTP，登录后 unsafe 请求保留 session 绑定 CSRF，由前端自动处理，无用户配置项。
 
@@ -58,18 +62,17 @@ MEMENTO_ENV=development cargo run
 
 ### 配置
 
-通过系统环境或所选环境文件配置，系统值优先。使用 `.env.development.example` / `.env.production.example`，不要使用旧通用 `.env.example` 作为当前启动契约。样例 hash/secret 为空，必须自行生成填写，没有可用默认弱凭据。
+Env 只承载运行、安全、秘密和业务规则；后台可编辑的非秘密功能设置放在 YAML；收藏、日记等业务数据放在 SQLite。通过系统环境或所选环境文件配置 Env，系统值优先。使用 `.env.development.example` / `.env.production.example`，不要使用旧通用 `.env.example` 作为当前启动契约。样例 hash/secret 为空，必须自行生成填写，没有可用默认弱凭据。YAML 结构参照可跟踪且不含秘密的 `memento.example.yaml`。
 
 | 变量 | 默认值 | 说明 |
 |---|---|---|
 | `MEMENTO_ENV` | `production` | 系统环境选择 `development` / `production`；dotenv 不可切换模式。 |
 | `MEMENTO_API_KEY` | 未设置/空白则禁用 key API | 收藏写入及日记全部读写共用的 key；需要外部 API 时显式设置，浏览器可独立使用。 |
 | `MEMENTO_DB_PATH` | 按环境 | 开发默认 `./memento.dev.db`，生产默认 `./memento.db`，相对进程 cwd。 |
+| `MEMENTO_CONFIG_PATH` | 按环境 | 开发默认 `./memento.development.yaml`，生产默认 `./memento.production.yaml`，相对 cwd；父目录须已存在。 |
 | `MEMENTO_BIND` | 按环境 | 开发默认 `0.0.0.0:23457`，生产默认 `127.0.0.1:23457`，不仅是样例值。 |
 | `RUST_LOG` | `info` | tracing 日志过滤器，例如 `memento=debug,tower_http=debug`。 |
-| `MEMENTO_SITE_NAME` | `memento` | 站点名称，用于页面标题与左上角品牌名。 |
-| `MEMENTO_SLOGAN` | `所有的美好都值得被珍藏与分享。` | 首页副标题（slogan）。 |
-| `MEMENTO_ICON` | 内置 🗂️ emoji SVG | favicon，可填 URL 或 data URI。 |
+| `MEMENTO_SITE_NAME` / `MEMENTO_SLOGAN` / `MEMENTO_ICON` | 内置值 | 已弃用；仅在 YAML 首次不存在时一次性 seed，文件存在后忽略。之后登录 `/admin` 修改。 |
 | `MEMENTO_LOGIN_USERNAME` | `admin` | 单个浏览器账号。 |
 | `MEMENTO_PASSWORD_HASH` | 无，必填 | bcrypt hash；旧 Argon2 hash 不兼容，须重新生成，不改收藏/日记数据。 |
 | `MEMENTO_TOTP_SECRET` | 无，必填 | Base32，解码至少 20 字节；两模式均必需。 |
@@ -78,6 +81,8 @@ MEMENTO_ENV=development cargo run
 | `MEMENTO_DIARY_TIMEZONE` | `Asia/Shanghai` | 没有未删除日记时新篇使用的业务时区；不改变收藏日期规则。 |
 
 本地命令：`memento hash-password`（终端无回显、二次确认）、`memento hash-password --stdin`（测试/集成）、`memento totp-secret`、`memento init-db <path>`。hash 使用 bcrypt `DEFAULT_COST=12`，密码非空且不超过 72 UTF-8 字节，防算法截断，不另设至少 12 字符规则。`totp-secret` 生成新 20 字节 Base32 secret，仅显示到用户终端；本地安全配置验证器为 6 位、SHA1、30 秒，容许前后各 1 时间步，不依赖域名。完整操作见[运维文档](docs/diary-operations.md)。
+
+YAML 当前为 `version: 1`，仅含 `site.name`、`site.slogan`、`site.icon`。后台写入会重新序列化整份文件，不保留注释或排版；应用按单实例运行且不监听外部修改。站点字段、首次 seed、原子 rename 提交点和平台边界见[管理后台设计](docs/admin-settings-design.md)。SQLite schema 仍为 v3，旧日记导入器不变。
 
 密码成功仅返回 5 分钟 challenge，不设置 Cookie；同一 `/session` 再提交 challenge/code 才创建 session。最多 5 次错误 OTP、64 个并行待验证 challenge，仅限制短期挑战而非长期会话。用户名/hash/TOTP 变动使旧 session 失效，origin 变动不踢旧 session。没有恢复码或自助账号管理，丢失设备须由运维更换 secret 并重新配置验证器。
 
@@ -129,6 +134,9 @@ MEMENTO_ENV=production ./memento
 | 方法与路径 | 说明 |
 |---|---|
 | `GET /` | 内嵌的 `index.html` |
+| `GET /login` | 登录页面壳；已登录后默认进入 `/admin` |
+| `GET /admin` | 管理页面壳；站点设置另由 session 鉴权接口读取 |
+| `GET /diary` | 日记页面壳；日记数据另由 session 鉴权接口读取 |
 | `GET /static/{file}` | 内嵌静态资源 |
 | `GET /api/health` | 健康检查 |
 | `GET /api/favorites` | 列表，按 `sort_date DESC, id DESC` 排序，`data` 为 `{ items, page, per_page, total }` |
@@ -288,7 +296,7 @@ cargo clippy --all-targets # lint
 cargo fmt                  # 格式化
 ```
 
-源码结构：`main.rs` 分派 CLI 或启动服务，`lib.rs` 装配路由与中间件，`handlers/` 处理 HTTP，`models.rs` 做收藏请求体校验与归一化，`repo.rs` 是收藏 SQL 数据访问，`db.rs` 管理连接池与 schema 版本升级，`image.rs` 负责图片解码 / 抓取 / 嗅探，`auth.rs` 做 API Key 鉴权；`browser.rs` 负责登录/session，`diary.rs` 负责日记业务。前端在 `static/`，为零依赖原生 HTML/CSS/JS；release 内嵌，修改后需重新构建并重启，默认 debug 从文件系统读取。
+源码结构：`main.rs` 分派 CLI 或启动服务，`lib.rs` 装配路由与中间件，`handlers/` 处理 HTTP，`models.rs` 做收藏请求体校验与归一化，`repo.rs` 是收藏 SQL 数据访问，`db.rs` 管理连接池与 schema 版本升级，`settings.rs` 管理 YAML 校验与原子持久化，`image.rs` 负责图片解码 / 抓取 / 嗅探，`auth.rs` 做 API Key 鉴权；`browser.rs` 负责登录/session，`diary.rs` 负责日记业务。前端在 `static/`，为零依赖原生 HTML/CSS/JS；release 内嵌，修改后需重新构建并重启，默认 debug 从文件系统读取。
 
 可选隔离回归（先构建 release，均使用临时库与合成凭据）：
 
@@ -319,10 +327,10 @@ python3 scripts/seed_import.py --old http://147.79.20.135:23456 --new http://loc
 ### 安全说明
 
 - 需要外部 key API 时显式设置固定强 `MEMENTO_API_KEY`；未设置/空白会禁用这些接口，不输出或使用临时密钥。浏览器登录独立配置。
-- 收藏读取公开、写入需要 `X-API-Key`（常量时间比较）；日记 key API 全部读写受保护，浏览器私有写入两模式均要求 CSRF，生产另要求精确 Origin。
+- 收藏读取公开、写入需要 `X-API-Key`（常量时间比较）；日记 key API 全部读写受保护。后台设置只接受管理员浏览器 session，PUT 两模式均要求 CSRF，生产另要求精确 Origin，API Key 不能替代。
 - `url` 字段服务端强制为 `http(s)`，拒绝 `javascript:` / `data:`。
 - 抓取 `image_url` 前会解析域名并拒绝指向私网 / 回环 / 链路本地 / CGNAT 的地址，且禁用重定向（防 SSRF）。
 - 上传或抓取的图片按真实魔数（jpeg/png/gif/webp/bmp/avif）判定 MIME，不信任客户端声明的 Content-Type。
-- 收藏写请求体上限约 20 MiB，单图原始字节上限 10 MiB；日记 JSON body 64 KiB，登录 body 8 KiB。
+- 收藏写请求体上限约 20 MiB，单图原始字节上限 10 MiB；日记 JSON body 64 KiB，登录 body 8 KiB，站点设置 JSON body 512 KiB。
 - 所有响应带 `X-Content-Type-Options: nosniff`、`X-Frame-Options: DENY`、`Referrer-Policy: no-referrer`。
-- 不要把 API Key、密码/hash、TOTP secret/code、cookie、数据库、WAL/SHM、备份或实际环境文件提交进版本库。日记/session 响应 no-store；代理禁缓存，不记录搜索 query、认证头和正文。应用不再做 IP 分桶或全局 hash 限流，生产示例由 Nginx 对 `/session` 密码/OTP 入口限流，拒绝为 429。CORS 仅保留旧收藏路由组，不开放 cookie 跨域权限，详见运维文档。
+- 不要把 API Key、密码/hash、TOTP secret/code、cookie、数据库、WAL/SHM、备份、实际环境文件或运行 YAML 提交进版本库。日记/session/后台设置响应 no-store；代理禁缓存，不记录搜索 query、认证头和正文。应用不再做 IP 分桶或全局 hash 限流，生产示例由 Nginx 对 `/session` 密码/OTP 入口限流，拒绝为 429。CORS 仅保留旧收藏路由组，不开放 cookie 跨域权限，详见运维文档。

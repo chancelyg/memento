@@ -57,6 +57,8 @@ fn load_environment_file_in(directory: &std::path::Path) -> AppResult<Environmen
 const DEFAULT_BIND: &str = "127.0.0.1:23457";
 /// Default SQLite database path.
 const DEFAULT_DB_PATH: &str = "./memento.db";
+/// Default production YAML settings path.
+const DEFAULT_CONFIG_PATH: &str = "./memento.production.yaml";
 /// Length (in bytes) of a generated ephemeral API key before hex-encoding.
 const GENERATED_KEY_BYTES: usize = 24;
 
@@ -67,8 +69,7 @@ pub const DEFAULT_SLOGAN: &str = "所有的美好都值得被珍藏与分享。"
 /// Default favicon — an inline emoji SVG data URI (no external request).
 pub const DEFAULT_ICON: &str = "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🗂️</text></svg>";
 
-/// Operator-customisable display strings, injected into `index.html` at serve
-/// time. Each falls back to a built-in default when its env var is unset/blank.
+/// Legacy environment seed used only when the selected YAML file is first created.
 #[derive(Debug, Clone)]
 pub struct SiteConfig {
     /// `MEMENTO_SITE_NAME` — page title + brand text.
@@ -118,6 +119,8 @@ pub struct Config {
     pub api_key_generated: bool,
     /// Path to the SQLite database file.
     pub db_path: String,
+    /// Path to the versioned YAML application settings.
+    pub config_path: String,
     /// Address to bind the HTTP server to.
     pub bind: String,
     /// Operator-customisable site display strings.
@@ -157,10 +160,22 @@ impl Config {
                 }
             });
 
+        let config_path = env::var("MEMENTO_CONFIG_PATH")
+            .ok()
+            .filter(|s| !s.trim().is_empty())
+            .unwrap_or_else(|| {
+                if env::var("MEMENTO_ENV").as_deref() == Ok("development") {
+                    "./memento.development.yaml".into()
+                } else {
+                    DEFAULT_CONFIG_PATH.to_string()
+                }
+            });
+
         Self {
             api_key,
             api_key_generated,
             db_path,
+            config_path,
             bind,
             site: SiteConfig::from_env(),
         }
@@ -214,6 +229,7 @@ mod tests {
         env::remove_var("MEMENTO_ENV");
         env::remove_var("MEMENTO_API_KEY");
         env::remove_var("MEMENTO_DB_PATH");
+        env::remove_var("MEMENTO_CONFIG_PATH");
         env::remove_var("MEMENTO_BIND");
         env::remove_var("MEMENTO_SITE_NAME");
         env::remove_var("MEMENTO_SLOGAN");
@@ -232,6 +248,7 @@ mod tests {
         );
         assert_eq!(cfg.api_key.len(), 48);
         assert_eq!(cfg.db_path, DEFAULT_DB_PATH);
+        assert_eq!(cfg.config_path, DEFAULT_CONFIG_PATH);
         assert_eq!(cfg.bind, DEFAULT_BIND);
     }
 
@@ -242,12 +259,14 @@ mod tests {
         env::set_var("MEMENTO_API_KEY", "  secret  ");
         env::set_var("MEMENTO_DB_PATH", "/tmp/x.db");
         env::set_var("MEMENTO_BIND", "127.0.0.1:9000");
+        env::set_var("MEMENTO_CONFIG_PATH", "  /tmp/settings.yaml  ");
 
         let cfg = Config::from_env();
         assert!(!cfg.api_key_generated);
         assert_eq!(cfg.api_key, "secret");
         assert_eq!(cfg.db_path, "/tmp/x.db");
         assert_eq!(cfg.bind, "127.0.0.1:9000");
+        assert_eq!(cfg.config_path, "  /tmp/settings.yaml  ");
 
         clear_env();
     }
@@ -290,6 +309,7 @@ mod tests {
         env::set_var("MEMENTO_API_KEY", "   ");
         env::set_var("MEMENTO_DB_PATH", "   ");
         env::set_var("MEMENTO_BIND", "   ");
+        env::set_var("MEMENTO_CONFIG_PATH", "   ");
 
         let cfg = Config::from_env();
         assert!(
@@ -301,6 +321,7 @@ mod tests {
             "blank db path falls back to default"
         );
         assert_eq!(cfg.bind, DEFAULT_BIND, "blank bind falls back to default");
+        assert_eq!(cfg.config_path, DEFAULT_CONFIG_PATH);
 
         clear_env();
     }
@@ -336,6 +357,7 @@ mod tests {
         );
         assert_eq!(env::var("MEMENTO_SITE_NAME").unwrap(), "system");
         assert_eq!(Config::from_env().bind, "0.0.0.0:12345");
+        assert_eq!(Config::from_env().config_path, "./memento.development.yaml");
         clear_env();
     }
 

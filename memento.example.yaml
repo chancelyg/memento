@@ -1,0 +1,5 @@
+version: 1
+site:
+  name: memento
+  slogan: 所有的美好都值得被珍藏与分享。
+  icon: "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🗂️</text></svg>"

@@ -4,11 +4,12 @@
 
 ## 部署准备
 
-release 二进制内嵌静态资源，但收藏、图片、日记和 session 持久化在外部 SQLite 文件，不在二进制中。默认 debug 从工作区读取静态资源，不能当作独立静态资源包交付。升级页面必须重新构建并重启 release 二进制。
+release 二进制内嵌静态资源，但收藏、图片、日记和 session 持久化在外部 SQLite，管理员可编辑的非秘密功能设置持久化在外部 YAML，均不在二进制中。默认 debug 从工作区读取静态资源，不能当作独立静态资源包交付。升级页面必须重新构建并重启 release 二进制。
 
 | 配置 | 行为 |
 |---|---|
 | `MEMENTO_DB_PATH` | 开发默认 `./memento.dev.db`，生产默认 `./memento.db`，绝不能指向旧日记源库 |
+| `MEMENTO_CONFIG_PATH` | YAML 设置路径；开发默认 `./memento.development.yaml`，生产默认 `./memento.production.yaml`，相对 cwd，父目录须已存在 |
 | `MEMENTO_ENV` | 系统环境选择 development/production，默认 production；配置文件不能切换模式 |
 | `MEMENTO_BIND` | 开发默认 `0.0.0.0:23457`，生产默认 `127.0.0.1:23457`，不仅是样例；生产经 Nginx 接入 |
 | `MEMENTO_API_KEY` | 需要外部 API 时显式设置固定强 key；未设置/空白禁用全部 key 鉴权接口，启动只提示禁用、不输出密钥 |
@@ -18,12 +19,15 @@ release 二进制内嵌静态资源，但收藏、图片、日记和 session 持
 | `MEMENTO_SESSION_TTL_DAYS` | 默认 7，正整数天，不滑动续期、不限制有效 session 为 32 个 |
 | `MEMENTO_PUBLIC_ORIGIN` | production 必须显式 canonical HTTP(S) origin；development 不做 Origin/Host 比对 |
 | `MEMENTO_DIARY_TIMEZONE` | 默认 `Asia/Shanghai`；可解析的时区名，非法值使启动失败 |
+| 旧 `MEMENTO_SITE_NAME` / `MEMENTO_SLOGAN` / `MEMENTO_ICON` | 已弃用；仅在所选 YAML 首次不存在时按字段 seed，文件存在后忽略 |
 
 开发与生产都必须配置密码和 TOTP，不能用开发模式绕过第二因素。默认用户名 admin。保留现有收藏 key 也意味着将日记读写权限授予所有现有 key 持有者；若他们不应接触日记，应先重新分配信任边界，本期不支持细分权限。
 
 反过来，不配置 key 可以独立使用浏览器登录和私有日记，收藏公开读取也不受影响；收藏写入、`/api/diaries` 全部读写和 `/api/auth/verify` 则返回 401。`Config` 内部虽仍生成旧兼容随机值，`run()` 会改传空 key 给 `AppState`，不使用或输出该随机值；不要从日志寻找临时凭据。
 
-无参数 server 启动先从系统 MEMENTO_ENV 选择模式，仅从进程 cwd 加载选定 `.env.development` 或 `.env.production`；不加载通用 `.env`、不向父目录查找，也不按二进制位置寻找。系统已有值优先，文件内的 MEMENTO_ENV 不能偷切模式。`hash-password`、`totp-secret`、`init-db` 均不加载任何 dotenv。样例为根目录 `.env.development.example` / `.env.production.example`，hash/secret 故意留空。实际配置仅供部署账号读取，勿置于 static、可下载目录、Git 或日志附件；不要假定旧忽略规则已保护新文件名。
+无参数 server 启动先从系统 MEMENTO_ENV 选择模式，仅从进程 cwd 加载选定 `.env.development` 或 `.env.production`；不加载通用 `.env`、不向父目录查找，也不按二进制位置寻找。系统已有值优先，文件内的 MEMENTO_ENV 不能偷切模式。`hash-password`、`totp-secret`、`init-db` 均不加载任何 dotenv 或 YAML。样例为根目录 `.env.development.example` / `.env.production.example`，hash/secret 故意留空；`memento.example.yaml` 仅示意可跟踪的非秘密结构。实际 Env 仅供部署账号读取，勿置于 static、可下载目录、Git 或日志附件。
+
+配置职责不可混用：Env 只放运行、安全、秘密和业务规则；YAML 只放后台可编辑的非秘密功能设置；SQLite 放业务数据。当前 YAML 只含站点名称、标语、图标，SQLite schema 仍是 v3，`scripts/import_diaries.py` 的格式和流程不变。默认运行 YAML 及其临时文件已精确忽略；若使用自定义路径，必须自行检查权限和 `git status`。
 
 ## 最短内网启动
 
@@ -47,7 +51,7 @@ MEMENTO_ENV=production ./memento
 
 hash 值保留单引号避免 `$` 插值，不把明文密码或 secret 写进命令。开发样例 DB `./memento.dev.db`，生产样例 DB `./memento.db`，相对路径基于 cwd。首次启动会初始化新库；已有目标升级仍须停服和一致备份，不能用旧 app.db 作为运行库。
 
-开发默认监听 `0.0.0.0:23457`，可信内网浏览器访问 `http://<机器内网IP>:23457/diary`；0.0.0.0 不是访问 URL。生产默认仅监听 `127.0.0.1:23457`，浏览器经 HTTP Nginx 的 `http://机器IP:8080/diary` 访问，PUBLIC_ORIGIN 填 `http://机器IP:8080`，无需域名/证书。确认网络可达和防火墙允许外部端口，不暴露上游端口。测试实例可以另设端口，不改变产品默认值。
+开发默认监听 `0.0.0.0:23457`，可信内网浏览器访问 `http://<机器内网IP>:23457/diary` 或 `/admin`；0.0.0.0 不是访问 URL。生产默认仅监听 `127.0.0.1:23457`，浏览器经 HTTP Nginx 的 `http://机器IP:8080/diary` 或 `/admin` 访问，PUBLIC_ORIGIN 填 `http://机器IP:8080`，无需域名/证书。确认网络可达和防火墙允许外部端口，不暴露上游端口。测试实例可以另设端口，不改变产品默认值。
 
 ## 新密码与初始化
 
@@ -76,6 +80,7 @@ MEMENTO_SESSION_TTL_DAYS=7
 MEMENTO_DIARY_TIMEZONE=Asia/Shanghai
 MEMENTO_BIND=127.0.0.1:23457
 MEMENTO_DB_PATH=/var/lib/memento/memento.db
+MEMENTO_CONFIG_PATH=/var/lib/memento/memento.production.yaml
 MEMENTO_PUBLIC_ORIGIN=http://192.168.1.20:8080
 ```
 
@@ -84,6 +89,21 @@ MEMENTO_PUBLIC_ORIGIN=http://192.168.1.20:8080
 `init-db <path>` 明确初始化/升级指定目标，打印 `database initialized`；它不启动服务器、不加载任何 dotenv、不初始化常规服务日志，也不生成或记录 API Key。hash-password/totp-secret 同样在服务配置之前执行。目标父目录须已存在且可写；init-db 会真实写数据库，不是 dry-run。未知 CLI 参数报错而非启动服务。
 
 `build_pool` 对已有数据库先只读预检 schema，拒绝外来日记库、未来版本和残缺 v1/v2/v3，通过后才启用 WAL。init_schema 在 IMMEDIATE 事务内再次校验升级，不仅相信版本标记。v2 添加 nullable deleted_at，旧行默认 NULL；v3 添加 browser_totp_state(credential_hash TEXT PRIMARY KEY,last_used_step INTEGER NOT NULL)。支持空库/既有收藏库、v1/v2 顺序升级到 3，历史 1、2、3，保留原日记字段、会话、收藏、ledger 和 ID sequence。Unix 新文件 0600，旧权限不自动修改；升级前检查库、目录、WAL/SHM 和备份权限。预检不替代完整性或备份校验。
+
+## 升级到 YAML 设置
+
+该升级新增外部设置文件，不改变 SQLite schema v3，也不改变导入器。升级前后保持单实例，不让新旧二进制同时共享目标 YAML。
+
+1. 停止 memento 和写入方，记录当前二进制、所选 Env、cwd、数据库路径与计划中的 `MEMENTO_CONFIG_PATH`。
+2. 对 SQLite 做下文要求的一致备份；另对现有 Env 做受控配置备份。若 YAML 已存在，也单独备份原字节、权限和所有者；不要把配置备份提交 Git。
+3. 确认 YAML 父目录已经存在、归部署账号所有且可写。可省略 `MEMENTO_CONFIG_PATH` 使用按环境默认值，也可显式设置持久化绝对路径；相对路径基于 cwd。
+4. 若此前使用旧 `MEMENTO_SITE_NAME` / `MEMENTO_SLOGAN` / `MEMENTO_ICON`，保留它们完成首次启动 seed。不要预先放置空壳 YAML，否则旧 Env 会被忽略。首次创建后检查 YAML 内容和 Unix 0600 权限，再从 Env 删除这些弃用变量。
+5. 启动新二进制。目标缺失时 server 创建；父目录缺失或既有 YAML 的语法、版本、未知字段、值校验失败时拒绝启动，不覆盖原文件。失败时修复或恢复 YAML，不要删除文件来意外重新 seed。
+6. 以唯一管理员完成密码和 TOTP 登录，访问 `/admin` 读取并保存站点信息，再刷新 `/`、`/diary`、`/login` 验证名称、标语、图标和导航。确认首页没有名称搜索控件，同时 `GET /api/favorites?q=...` 仍可用。
+
+唯一浏览器账号即管理员，`MEMENTO_LOGIN_USERNAME` 只是该账号名称；多个 session 是多设备，不是多用户或 RBAC。后台 `GET/PUT /private/settings/site` 必须使用 session，PUT 还需 CSRF 和 production 精确 Origin，API Key 不能替代。
+
+程序保存会重新序列化完整 YAML，不保留注释或人工排版。运行中不监听外部修改；不要在线编辑，也不要运行多个共享 YAML 的实例。写入使用同目录 0600 临时文件，文件同步后以 rename 作为提交点，再尽力同步父目录。覆盖 rename、目录同步及崩溃恢复的跨平台行为尚未验证，尤其不能把 Unix 验证外推到 Windows。
 
 ## 环境与反代
 
@@ -106,10 +126,10 @@ CSRF 由前端自动处理，无用户配置；API Key 分组规则不变。生�
 
 两文件是可整体 include 的 **http 上下文片段**，包含 limit_req_zone、upstream 和 server，适合已有 nginx.conf 在 http {} 内加载的 conf.d。不是直接 `nginx -c` 使用的 main 上下文完整配置，也不能放进 server/location 内。二选一启用，不能让 conf.d 通配符同时加载它们，否则同名 zone/upstream 冲突。不另拆公共 include；若已有其他服务配置，运维须检查监听、命名和继承冲突。
 
-1. 所有路径原样代理：`/`、`/diary`、`/static/`、`/session`、两组日记与收藏 API；proxy_pass 无 URI 后缀、不 rewrite、不用 SPA fallback 吞掉 API 404。
+1. 所有路径原样代理：`/`、`/diary`、`/login`、`/admin`、`/static/`、`/session`、后台设置、两组日记与收藏 API；proxy_pass 无 URI 后缀、不 rewrite、不用 SPA fallback 吞掉 API 404。
 2. `Host $http_host` 保留外部端口，`Origin $http_origin` 原样传递，不能将来源重写为固定可信值。Cookie、X-CSRF-Token、If-Match、X-API-Key 默认透传；Set-Cookie、ETag、Cache-Control 和安全响应头保留。
 3. server 级 proxy_cache off、proxy_buffering off 覆盖敏感路径，不覆盖应用 no-store；proxy_next_upstream off 禁止上游失败自动重发 POST。不得增加 cookie 跨域 CORS。
-4. 全站 body 20m 保留收藏图片上传，精确 `/session` 8k，`/api/diaries`、`/private/diaries` 及其子路径 64k；代理拒绝可能是非 JSON。
+4. 全站 body 20m 保留收藏图片上传，精确 `/session` 8k，`/api/diaries`、`/private/diaries` 及其子路径 64k；应用另对 `/private/settings/site` 强制 512 KiB。代理拒绝可能是非 JSON。
 5. map 和 limit_req_zone 在 http 上下文定义，`/session` 使用 limit_req；示例 10r/m、burst 10、nodelay、失败 429，密码及验证码 POST 共用。GET/DELETE 使用空 key 不计入限流，不阻止会话查询或退出。可按个人使用调整。直接面向客户端以 remote address 分流；若再加前置代理，另行明确可信真实 IP 边界，不盲信 XFF。应用不再有 IP 分桶或全局 hash 限流，64 个待验证 challenge 不是长期 session 限制。
 6. access_log off 避免 query/headers 被访问日志采集；error_log warn 不启用 debug/trace 或正文/认证头采样。**Nginx 错误日志和上级日志仍可能包含请求 URI**，因此限制日志权限、保留周期及错误采样，不承诺全部日志绝无隐私；同时检查 CDN/WAF/APM，不运行 curl verbose/trace 记录凭据。
 
@@ -140,7 +160,7 @@ schema v3 的 browser_totp_state 按凭据指纹保存已成功使用的时间�
 保留原始源文件，只读使用，严禁将 `src_db`/旧 e4 库设置为 `MEMENTO_DB_PATH` 或传给 `init-db`。导入脚本只读取 `diaries` 的 `id/content/create_date/created_at/updated_at`，不读取认证表或其他业务模块。
 
 1. 停止旧源服务和 memento 目标服务，并暂停所有 Agent/定时任务写入；导入器不会替你检测或停止服务。保持停服直到迁移核验结束。
-2. 对 source 和现有 target 分别做 SQLite 一致备份，并记录对应二进制版本、配置、备份时间及恢复位置。新目标尚不存在时记录该事实，初始化后、导入前再备份目标。
+2. 对 source 和现有 target 分别做 SQLite 一致备份，并记录对应二进制版本、Env、YAML 设置、cwd、备份时间及恢复位置。YAML 按独立普通文件备份并保留权限/所有者，不要混入 SQLite backup API；新目标或 YAML 尚不存在时记录该事实，初始化或首次启动后、导入前再备份目标状态。
 3. 使用 SQLite backup API 或 SQLite 工具的 backup 功能生成独立一致快照；验证备份可打开及完整性。不要随意 `cp` 活跃 WAL 模式下的 `.db`，也不要漏掉尚未 checkpoint 的提交。只有全部连接确已关闭且正确完成 checkpoint，才可考虑离线文件级备份；不要手工删除 WAL/SHM 充当 checkpoint。
 4. 用新二进制对独立目标执行 init-db，导入器要求完整 schema v3，不能直接向 v1/v2 导入。空库/既有收藏库、v1/v2 按需顺序升级到 3，历史为 1、2、3；保留收藏、会话、日记、ledger 和 ID sequence。导入器检查 browser_totp_state 元数据但不读其真实内容，源五字段不变。已有文件先只读预检再启用 WAL，拒绝外来、未来或残缺 schema，事务内再次验证。初始化也是写操作，须在备份之后。
 
@@ -190,7 +210,7 @@ python3 -B scripts/import_diaries.py \
 
 保真检查应在受控本地比较五字段、ID、null/旧字符串和 ledger，不把比对正文输出到日志或报告。使用备份副本或合成库演练编辑/删除后的重导、版本竞争和回滚，不能为了验收破坏真实日记。
 
-确认目标路径、环境模式、密码/TOTP 与生产 origin 配置和实际访问地址后启动服务并重新开放写入。浏览器验收两步登录、读取、筛选、编辑冲突、退出及桌面/手机页面；鉴权验收匿名拒绝、开发无 Origin 比对/生产精确 Origin、cookie/key 不可互换、两模式 CSRF、no-store、收藏公开读不回归。另验无 If-Match 可写、有版本仍防冲突。真实数据环境只执行获授权操作，CRUD 演练优先使用隔离测试实例。
+确认目标路径、环境模式、密码/TOTP、YAML 与生产 origin 配置和实际访问地址后启动服务并重新开放写入。浏览器验收两步登录、管理页读取/保存站点信息、共享导航、日记读取/筛选/编辑冲突/退出及桌面/手机页面；鉴权验收匿名拒绝、开发无 Origin 比对/生产精确 Origin、cookie/key 不可互换、两模式 CSRF、no-store、收藏公开读及 API `q` 不回归。另验无 If-Match 可写、有版本仍防冲突。真实数据环境只执行获授权操作，CRUD 演练优先使用隔离测试实例。
 
 ## 回滚与凭据轮换
 
@@ -199,13 +219,13 @@ python3 -B scripts/import_diaries.py \
 1. 停止相关服务和写入方，保留失败现场供受控排查，确认选择 source/target 对应的迁移前一致备份。
 2. 按备份工具的恢复流程还原完整目标库，不用批量 DELETE、清空 ledger 或手改 schema 版本模拟回滚。源库正常情况下没有改动；仅在确有需要时还原对应源备份。
 3. 还原时处理现有数据库及其 WAL/SHM 的一致性，不能将旧备份 `.db` 与本次运行残留的 WAL 混用；所有进程保持停止，按 SQLite 恢复流程处理，不直接对活库覆盖。
-4. 恢复与备份匹配的程序和配置后再验收。整库还原也会回退备份后新增的收藏、日记及 session，提前明确数据损失窗口，不承诺无损自动回滚。
+4. 恢复与备份匹配的程序、Env、YAML、cwd 和权限后再验收。YAML 与 SQLite 是独立持久化边界，必须按同一恢复点配对；只恢复其一可能得到旧站点展示或旧业务数据。整库还原也会回退备份后新增的收藏、日记及 session，提前明确数据损失窗口，不承诺无损自动回滚。
 
 需要撤销浏览器旧 session 时生成新 hash 或 TOTP secret 并更新配置、重启；用户名变化也踢旧 session，origin 变化不踢。丢失验证器没有恢复码/自助重置入口，由有部署权限的运维运行 totp-secret、安全更换配置并在本地重新登记。恢复旧库/旧凭据可能让旧 session 再次有效，安全事件后不要恢复泄露配置。单独轮换 API Key 不替代浏览器凭据轮换；key 轮换须同步所有授权 Agent。
 
 ## 验证入口
 
-从当前仓库根目录执行，不使用旧 `/root/codes/memento` 路径。按 `.github/workflows/ci.yml` 顺序；本轮结果见末尾摘要，后续代码变化须重新验证：
+从当前仓库根目录执行，不使用旧 `/root/codes/memento` 路径。按 `.github/workflows/ci.yml` 顺序；末尾记录当前导航/后台/YAML 改动的本地验证结果，后续代码变化仍须重新验证：
 
 ```bash
 cargo fmt --all -- --check
@@ -254,20 +274,16 @@ cargo llvm-cov --all-targets --show-missing-lines --quiet
 
 ## 本轮验证
 
-以下为当前双环境、bcrypt/TOTP、可选版本条件实现的本地验证结果（Rust 1.98.1、Python 3.13.5、Linux）。后续修改须重新验证，不把测试数量作为固定验收常量。
+2026-09-09 在任务 Worktree 使用 Rust 1.98.1、Python 3.13.5、agent-browser 0.36.0 和 Linux 完成当前导航、后台与 YAML 改动的本地验证。合成测试不代表生产部署、真实数据迁移或跨平台行为已经验证。
 
 | 检查 | 结果与范围 |
 |---|---|
 | Rust 格式/静态检查/构建 | cargo fmt --all -- --check、严格 clippy、cargo build --release 通过 |
-| Rust 全量测试 | 242 个通过：110 lib + 30 api + 42 browser_auth + 7 cli + 38 diary_api + 15 migrations = 242 |
+| Rust 全量测试 | 255 个通过：122 lib + 30 api + 43 browser_auth + 7 cli + 38 diary_api + 15 migrations = 255 |
 | Python 导入测试 | 32 个通过，启用 -W error::ResourceWarning；使用合成数据库 |
-| 浏览器 smoke | development bcrypt + 两步 OTP（第一阶段未登录断言）、XSS 纯文本、版本冲突编辑、软删存储保留、390px 视口、挂起列表时退出通过 |
-| Nginx smoke | Nginx 1.26.3，两份片段 nginx -t 与真实隔离 HTTP/HTTPS 反代通过；生产环境文件加载、Origin 403、密码/OTP 两步、HTTP Strict 无 Secure / TLS Secure、TTL 2 天、API Key 透传、可选 If-Match、64k/8k body 413、limit_req 429 通过 |
-| 限流范围 | 密码/验证码 POST 达到限额后，GET 会话查询和 DELETE 退出仍能到达应用，没有被同一额度阻挡 |
-| Rust 行覆盖率 | cargo-llvm-cov 0.9.1：整体 92.69%；browser.rs 96.23%、diary.rs 97.25%、日记 handler 99.34%。包含模块内测试代码，非分支覆盖或安全证明 |
-| 真实旧库演练 | 在临时 v3 目标导入 3069 篇，五个原字段逐项一致；重复执行全部跳过，软删后重导不复活，完整性/外键检查通过。临时目标已删除，源库 size/mtime 未变 |
-| 人工验收启动 | 当前任务 release 已以 development 监听 0.0.0.0:23459；通过机器内网地址验证页面、密码和 TOTP 登录，保留既有验收日记。仅独立验收实例，不是生产部署 |
+| 浏览器 smoke | release 内嵌、独立登录页密码 + TOTP、匿名日记跳转、YAML 隔离生成、后台保存和首页即时品牌、首页无搜索、共享导航、390px、XSS、日记冲突/软删及挂起列表退出通过 |
+| Nginx smoke | 本次未重跑；此前 Nginx 1.26.3 隔离验证仅作历史参考，不能据此推断新增后台路由的生产反代状态 |
+| Rust 行覆盖率 | 本次未重跑；历史覆盖率不能代表当前代码 |
+| 真实旧库演练 | 本次未执行；SQLite schema 和导入器未改，仍不能由合成测试推断真实迁移成功 |
 
-验证环境未安装系统 Nginx，使用在 /tmp 下载解包的 Nginx 1.26.3、临时 prefix 和合成证书，没有安装或操作系统服务。仓库新环境模板未被本轮回读验证；上述环境加载结果只来自测试自建 fixture。
-
-未验证项仍包括真实域名/证书部署、多平台运行、TTY 交互式密码输入、真实环境恢复及部分公网图片下载路径。两份仓库环境模板的回读被工具权限策略拦截，未绕过；环境文件加载及 Nginx 测试使用的是受控临时 fixture。真实 app.db 未变，未进行生产迁移或部署。验收地址与凭据交付位置以本次交付说明为准，不作为项目固定配置。
+未验证项仍包括真实域名/证书部署、Nginx 对新增后台路由的隔离回归、多平台 YAML 覆盖写、TTY 交互式密码输入、真实环境恢复及部分公网图片下载路径。测试只使用受控临时 fixture；真实 app.db 未变，未进行生产迁移或部署。验收地址与凭据交付位置以本次交付说明为准，不作为项目固定配置。

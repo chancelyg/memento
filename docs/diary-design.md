@@ -1,6 +1,6 @@
 # 登录与私有日记设计
 
-本文描述登录与连续日记的实现设计。接口见 [diary-api.md](diary-api.md)，部署、迁移、回滚及验证摘要见 [diary-operations.md](diary-operations.md)。本地验证不代表生产已迁移或上线。
+本文描述登录与连续日记的实现设计。接口见 [diary-api.md](diary-api.md)，管理后台与 YAML 见 [admin-settings-design.md](admin-settings-design.md)，部署、迁移、回滚及验证摘要见 [diary-operations.md](diary-operations.md)。本地验证不代表生产已迁移或上线。
 
 ## 范围与决策
 
@@ -9,6 +9,7 @@
 - 日记与收藏分表，但共用 SQLite 文件、进程和当前唯一的 `MEMENTO_API_KEY`。key 持有者可读取、创建、编辑、删除全部日记，也能写收藏；没有只读 key、日记专用 scope 或按 Agent 分权。
 - 服务启动未设置/空白 key 时，`run()` 向 `AppState` 传空 key，禁用收藏写入、日记 key API 和 `/api/auth/verify`，仅日志提示禁用，不输出密钥；收藏公开读取和单独配置的浏览器登录仍可用。`Config` 内部旧随机值保留兼容，但不会被启动流程用于鉴权或输出。
 - 浏览器不用 API Key。`/session` 和 `/private/diaries` 是同源浏览器专用协议，不是给第三方换取 token 的登录平台；Agent 只调用 `/api/diaries`。
+- 浏览器模型严格单用户：唯一账号就是管理员，多 session 仅表示同一人的多设备/浏览器，不增加用户、角色或 RBAC。管理员 session 也用于 `/private/settings/site`，但 API Key 不能替代。
 - 业务日记日期与实际写入时间分离。日期代表连续编排的位置，不是每次请求的自然日，也不限制一天只能创建一篇。
 - 日记删除是软删除：不再显示，但原行及正文仍保留；本期无回收站、恢复、永久清除 API 或内容审计。收藏保持硬删除。两者都不保证数据库文件、WAL 或备份中的内容安全擦除；整库备份回滚不是单篇恢复接口。
 
@@ -18,6 +19,7 @@
 |---|---|
 | `src/main.rs`、`src/cli.rs` | 先分派本地 CLI；无参数才加载 dotenv、初始化 tracing 并启动服务 |
 | `src/lib.rs`、`src/browser.rs` | 路由及安全层；双环境配置、bcrypt/TOTP、challenge/session、Origin/CSRF |
+| `src/settings.rs`、`src/handlers/settings.rs` | 非秘密 YAML 功能设置校验、原子持久化及管理员站点设置接口 |
 | `src/handlers/diary.rs` | 两组日记路由共用的 HTTP 提取、脱敏错误、If-Match、ETag 与阻塞任务调度 |
 | `src/diary.rs` | 与 HTTP 无关的正文校验、查询和事务内日期分配、版本校验、软删除 |
 | `src/db.rs` | WAL 连接池、事务化 schema 升级及版本拒绝策略 |
@@ -49,10 +51,13 @@ DELETE 在事务内保留正文、原日期和 `created_at`，设置 UTC RFC3339
 | 收藏写入、`GET /api/auth/verify` | `X-API-Key` 常量时间比较 |
 | `/api/diaries` 及其详情路由 | 全部读写必须有 key；cookie 不能替代 |
 | `/private/diaries` 及其详情路由 | 全部读写必须有有效 session；key 不能替代；写入两模式均需 CSRF，生产另需精确 Origin |
+| `/private/settings/site` | GET/PUT 必须有管理员 session；PUT 另需 CSRF，production 需精确 Origin；key 不能替代 |
 | `/session` | POST 分密码、TOTP 两步；GET 查询 session；DELETE 撤销 session |
 | `/diary` | 公开加载页面壳，不含日记数据；数据另外鉴权获取 |
 
 系统 `MEMENTO_ENV` 先选择 development/production，默认 production。无参数 server 仅加载 cwd 的选定 `.env.development`/`.env.production`，不读通用 `.env` 或父目录，系统值优先，文件不可切换模式。hash-password、totp-secret、init-db 不加载任何 dotenv。开发样例 bind `0.0.0.0:23457`、DB `./memento.dev.db`；生产样例 bind `127.0.0.1:23457`、DB `./memento.db`，经 Nginx 接入。模式在启动命令显式指定，不能靠 Cargo debug/release 推断。
+
+Env 仅保存运行、安全、秘密和业务规则；管理员可编辑的非秘密站点功能设置进入 YAML；SQLite 继续保存业务数据，schema 保持 v3，导入器不变。YAML 开发/生产默认分别为 cwd 下 `./memento.development.yaml` / `./memento.production.yaml`，首次缺失时 server 创建，CLI 不读取。旧 site Env 只作首次 seed，文件存在后忽略。详细生命周期、字段与原子保存边界见管理后台设计。
 
 两模式均要求 bcrypt `MEMENTO_PASSWORD_HASH` 和 Base32 `MEMENTO_TOTP_SECRET`（解码至少 20 字节），用户名默认 admin。不兼容旧 Argon2 hash，须重生但不改日记/收藏数据，不迁移旧认证数据。hash-password 及 --stdin 使用 bcrypt DEFAULT_COST=12，密码非空且至多 72 UTF-8 字节，防止算法截断，不另设至少 12 字符规则。totp-secret 生成新 20 字节 Base32 secret，仅在用户终端显示；本地安全登记验证器（6 位、SHA1、30 秒、前后各 1 步容差），不依赖域名。
 

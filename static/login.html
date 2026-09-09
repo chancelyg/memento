@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="referrer" content="no-referrer" />
+  <meta name="description" content="{{SLOGAN}}" />
+  <title>登录 · {{SITE_NAME}}</title>
+  <link rel="icon" href="{{ICON}}" />
+  <link rel="stylesheet" href="/static/site-shell.css" />
+  <link rel="stylesheet" href="/static/admin.css" />
+  <script src="/static/site-shell.js" defer></script>
+  <script src="/static/login.js" defer></script>
+</head>
+<body data-page="login">
+  <header class="site-header">
+    <nav class="site-nav" aria-label="主导航">
+      <a class="site-brand" href="/" aria-label="{{SITE_NAME}} 首页">
+        <span class="site-brand__icon-wrap" aria-hidden="true"><img class="site-brand__icon" src="{{ICON}}" alt="" /><span class="site-brand__mark"></span></span>
+        <span class="site-brand__name">{{SITE_NAME}}</span>
+      </a>
+      <a class="site-link" data-nav-page="collection" href="/">收藏</a>
+      <a class="site-link" data-nav-page="diary" href="/diary">日记</a>
+      <div class="nav-future" aria-hidden="true"></div>
+      <button id="themeToggle" class="theme-toggle" type="button" aria-label="切换浅色 / 深色主题" title="切换主题">☾</button>
+      <a id="shellAccount" class="site-account" href="/login">账户</a>
+    </nav>
+  </header>
+  <main class="account-main">
+    <section class="account-intro">
+      <p class="eyebrow">PRIVATE ACCESS</p>
+      <h1>回到你的私人空间。</h1>
+      <p>{{SLOGAN}}</p>
+    </section>
+    <section class="form-card" aria-labelledby="loginTitle">
+      <h2 id="loginTitle">登录</h2>
+      <p id="notice" class="muted" role="status" aria-live="polite">正在检查登录状态…</p>
+      <form id="loginForm" hidden>
+        <label for="username">用户名</label>
+        <input id="username" name="username" autocomplete="username" value="admin" required />
+        <label for="password">密码</label>
+        <input id="password" name="password" type="password" autocomplete="current-password" required />
+        <p id="loginError" class="error" role="alert"></p>
+        <button class="primary" id="loginButton" type="submit">下一步：验证身份</button>
+      </form>
+      <form id="totpForm" hidden aria-labelledby="totpTitle">
+        <h3 id="totpTitle">第二步：验证码</h3>
+        <p id="totpHelp" class="muted">请输入验证器中的 6 位验证码。验证请求有效期为 5 分钟，最多允许 5 次错误；过期或次数用尽后，请返回上一步重新验证密码。</p>
+        <label for="code">验证码</label>
+        <input id="code" name="code" type="text" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" minlength="6" maxlength="6" aria-describedby="totpHelp" required />
+        <p id="totpError" class="error" role="alert"></p>
+        <div class="actions"><button id="backToPassword" type="button">返回上一步</button><button class="primary" id="totpButton" type="submit">验证并登录</button></div>
+      </form>
+    </section>
+    <noscript><p class="error">登录页面需要启用 JavaScript。</p></noscript>
+  </main>
+</body>
+</html>

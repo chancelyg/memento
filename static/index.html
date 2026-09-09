@@ -3,36 +3,32 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <meta name="description" content="memento — 个人海报墙，珍藏喜爱的游戏、图书与电影。" />
+  <meta name="description" content="{{SLOGAN}}" />
   <title>{{SITE_NAME}}</title>
+  <link rel="stylesheet" href="/static/site-shell.css" />
   <link rel="stylesheet" href="/static/styles.css" />
   <link rel="icon" href="{{ICON}}" />
 </head>
-<body>
+<body data-page="collection">
   <!-- Ambient glow layer (decorative) -->
   <div class="ambient" aria-hidden="true"></div>
 
-  <!-- Top bar (glass) -->
-  <header class="topbar" role="banner">
-    <div class="topbar__inner">
-      <a class="brand" href="/" aria-label="memento 首页">
-        <span class="brand__mark" aria-hidden="true"></span>
-        <span class="brand__name">{{SITE_NAME}}</span>
+  <header class="site-header">
+    <nav class="site-nav" aria-label="主导航">
+      <a class="site-brand" href="/" aria-label="{{SITE_NAME}} 首页">
+        <span class="site-brand__icon-wrap" aria-hidden="true">
+          <img class="site-brand__icon" src="{{ICON}}" alt="" />
+          <span class="site-brand__mark"></span>
+        </span>
+        <span class="site-brand__name">{{SITE_NAME}}</span>
       </a>
-      <a href="/diary">日记</a>
-
-      <div class="search" role="search">
-        <span class="search__icon" aria-hidden="true">🔍</span>
-        <input id="searchInput" class="search__input" type="search"
-               placeholder="搜索收藏…" autocomplete="off"
-               aria-label="按名称搜索收藏" />
-      </div>
-
+      <a class="site-link" data-nav-page="collection" href="/">收藏</a>
+      <a class="site-link" data-nav-page="diary" href="/diary">日记</a>
+      <div class="nav-future" aria-hidden="true"></div>
       <button id="themeToggle" class="theme-toggle" type="button"
-              aria-label="切换浅色 / 深色主题" title="切换主题">
-        <span class="theme-toggle__icon" aria-hidden="true">🌙</span>
-      </button>
-    </div>
+              aria-label="切换浅色 / 深色主题" title="切换主题">☾</button>
+      <a id="shellAccount" class="site-account" href="/login">账户</a>
+    </nav>
   </header>
 
   <main class="container" role="main">
@@ -45,11 +41,11 @@
 
     <!-- Filter chips -->
     <section class="controls" aria-label="筛选">
-      <div class="pills" role="tablist" aria-label="类型筛选">
-        <button class="pill is-active" role="tab" aria-selected="true" data-type="all">全部</button>
-        <button class="pill" role="tab" aria-selected="false" data-type="game"><span class="pill__emoji" aria-hidden="true">🎮</span> 游戏</button>
-        <button class="pill" role="tab" aria-selected="false" data-type="book"><span class="pill__emoji" aria-hidden="true">📚</span> 图书</button>
-        <button class="pill" role="tab" aria-selected="false" data-type="movie"><span class="pill__emoji" aria-hidden="true">🎬</span> 电影</button>
+      <div class="pills" aria-label="类型筛选">
+        <button class="pill is-active" type="button" aria-pressed="true" data-type="all">全部</button>
+        <button class="pill" type="button" aria-pressed="false" data-type="game"><span class="pill__emoji" aria-hidden="true">🎮</span> 游戏</button>
+        <button class="pill" type="button" aria-pressed="false" data-type="book"><span class="pill__emoji" aria-hidden="true">📚</span> 图书</button>
+        <button class="pill" type="button" aria-pressed="false" data-type="movie"><span class="pill__emoji" aria-hidden="true">🎬</span> 电影</button>
       </div>
       <p id="countLine" class="count-line" aria-live="polite"></p>
     </section>
@@ -100,6 +96,7 @@
   <!-- Toast -->
   <div id="toast" class="toast" role="alert" hidden></div>
 
+  <script src="/static/site-shell.js" defer></script>
   <script src="/static/app.js" defer></script>
 </body>
 </html>

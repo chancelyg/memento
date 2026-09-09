@@ -20,6 +20,7 @@ pub mod handlers;
 pub mod image;
 pub mod models;
 pub mod repo;
+pub mod settings;
 pub mod state;
 
 use axum::{
@@ -41,6 +42,7 @@ const MAX_REQUEST_BYTES: usize = 20 * 1024 * 1024;
 use crate::config::Config;
 use crate::error::AppError;
 use crate::state::AppState;
+use std::sync::Arc;
 
 /// Initialise the tracing subscriber honouring `RUST_LOG` (default `info`).
 pub fn init_tracing() {
@@ -62,6 +64,10 @@ pub async fn run() -> Result<(), AppError> {
         tracing::warn!("MEMENTO_API_KEY is unset; external API access is disabled until a fixed key is configured");
     }
 
+    let settings = Arc::new(settings::SettingsStore::load_or_create(
+        &config.config_path,
+        Some(config.site.clone()),
+    )?);
     let pool = db::build_pool(&config.db_path)?;
     db::init_schema(&pool)?;
     tracing::info!(db_path = %config.db_path, "database ready");
@@ -74,7 +80,7 @@ pub async fn run() -> Result<(), AppError> {
             config.api_key.clone()
         },
     )
-    .with_site(config.site.clone())
+    .with_settings(settings)
     .with_browser(browser)
     .with_diary_timezone(diary_timezone);
     let app = build_router(state);
@@ -117,6 +123,10 @@ pub fn build_router(state: AppState) -> Router {
                 .patch(handlers::diary::update)
                 .delete(handlers::diary::delete),
         )
+        .route(
+            "/private/settings/site",
+            get(handlers::settings::get_site).put(handlers::settings::put_site),
+        )
         .layer(middleware::from_fn_with_state(
             state.clone(),
             browser::require_session,
@@ -140,6 +150,8 @@ pub fn build_router(state: AppState) -> Router {
         .merge(private)
         .merge(diary_api)
         .route("/diary", get(assets::diary_handler))
+        .route("/login", get(assets::login_handler))
+        .route("/admin", get(assets::admin_handler))
         .layer(middleware::from_fn(private_response));
     // Write routes guarded by the API-key middleware.
     let guarded = Router::new()

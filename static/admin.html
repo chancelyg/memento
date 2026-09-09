@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="referrer" content="no-referrer" />
+  <meta name="description" content="{{SLOGAN}}" />
+  <title>站点管理 · {{SITE_NAME}}</title>
+  <link rel="icon" href="{{ICON}}" />
+  <link rel="stylesheet" href="/static/site-shell.css" />
+  <link rel="stylesheet" href="/static/admin.css" />
+  <script src="/static/site-shell.js" defer></script>
+  <script src="/static/admin.js" defer></script>
+</head>
+<body data-page="admin">
+  <header class="site-header">
+    <nav class="site-nav" aria-label="主导航">
+      <a class="site-brand" href="/" aria-label="{{SITE_NAME}} 首页">
+        <span class="site-brand__icon-wrap" aria-hidden="true"><img class="site-brand__icon" src="{{ICON}}" alt="" /><span class="site-brand__mark"></span></span>
+        <span class="site-brand__name">{{SITE_NAME}}</span>
+      </a>
+      <a class="site-link" data-nav-page="collection" href="/">收藏</a>
+      <a class="site-link" data-nav-page="diary" href="/diary">日记</a>
+      <div class="nav-future" aria-hidden="true"></div>
+      <button id="themeToggle" class="theme-toggle" type="button" aria-label="切换浅色 / 深色主题" title="切换主题">☾</button>
+      <a id="shellAccount" class="site-account" href="/login">账户</a>
+    </nav>
+  </header>
+  <main class="account-main">
+    <section class="account-intro">
+      <p class="eyebrow">SITE SETTINGS</p>
+      <h1>站点展示。</h1>
+      <p>这里只管理公开页面使用的名称、标语与图标。运行安全配置由 Env 管理，不会在此显示。</p>
+    </section>
+    <section class="form-card" aria-labelledby="settingsTitle">
+      <h2 id="settingsTitle">站点信息</h2>
+      <p id="adminStatus" class="muted" role="status" aria-live="polite">正在检查登录状态…</p>
+      <form id="settingsForm" hidden>
+        <label for="siteName">站点名称</label>
+        <input id="siteName" name="name" type="text" autocomplete="off" required />
+        <label for="siteSlogan">站点标语</label>
+        <input id="siteSlogan" name="slogan" type="text" autocomplete="off" />
+        <label for="siteIcon">图标 URL 或 data URI</label>
+        <input id="siteIcon" name="icon" type="text" inputmode="url" autocomplete="off" required />
+        <p class="muted">图标加载失败时，导航会显示内置 CSS 标记。</p>
+        <p id="settingsError" class="error" role="alert"></p>
+        <div class="actions"><button id="logout" type="button">退出登录</button><button id="saveSettings" class="primary" type="submit">保存站点信息</button></div>
+      </form>
+    </section>
+    <noscript><p class="error">管理页面需要启用 JavaScript。</p></noscript>
+  </main>
+</body>
+</html>

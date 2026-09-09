@@ -3,6 +3,7 @@
 pub mod diary;
 pub mod favorites;
 pub mod images;
+pub mod settings;
 
 use axum::{response::IntoResponse, Json};
 use serde_json::json;

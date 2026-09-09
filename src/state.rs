@@ -2,8 +2,8 @@
 
 use std::sync::Arc;
 
-use crate::config::SiteConfig;
 use crate::db::DbPool;
+use crate::settings::{AppSettings, SettingsStore, SiteSettings};
 
 /// Clone-able application state. Cloning is cheap (pool + Arc are reference
 /// counted).
@@ -17,8 +17,8 @@ pub struct AppState {
     pub pool: DbPool,
     /// Write-auth API key.
     pub api_key: Arc<String>,
-    /// Operator-customisable site display strings (name / slogan / icon).
-    pub site: Arc<SiteConfig>,
+    /// Runtime YAML settings and their persistent store.
+    pub settings: Arc<SettingsStore>,
 }
 
 impl AppState {
@@ -29,17 +29,21 @@ impl AppState {
             diary_timezone: chrono_tz::Asia::Shanghai,
             pool,
             api_key: Arc::new(api_key),
-            site: Arc::new(SiteConfig::default()),
+            settings: Arc::new(SettingsStore::in_memory()),
         }
     }
 
-    /// Return a copy of this state with the given site display config
-    /// (immutable update — does not mutate the receiver).
-    pub fn with_site(self, site: SiteConfig) -> Self {
-        Self {
-            site: Arc::new(site),
-            ..self
-        }
+    /// Return a copy of this state with the given settings store.
+    pub fn with_settings(self, settings: Arc<SettingsStore>) -> Self {
+        Self { settings, ..self }
+    }
+
+    /// Test helper for rendering a legacy environment-style site config.
+    pub fn with_site(self, site: crate::config::SiteConfig) -> Self {
+        self.with_settings(Arc::new(SettingsStore::in_memory_with(AppSettings {
+            site: SiteSettings::from(site),
+            ..AppSettings::default()
+        })))
     }
 
     pub fn with_browser(self, browser: crate::browser::BrowserAuth) -> Self {

@@ -144,7 +144,12 @@ fn no_store(headers: &HeaderMap) {
 #[tokio::test]
 async fn private_preflight_and_unsupported_methods_never_inherit_collection_cors() {
     let fixture = Fixture::new();
-    for path in ["/session", "/private/diaries", "/api/diaries"] {
+    for path in [
+        "/session",
+        "/private/diaries",
+        "/private/settings/site",
+        "/api/diaries",
+    ] {
         let (status, headers, body) = send(
             &fixture.app,
             request(
@@ -169,6 +174,117 @@ async fn private_preflight_and_unsupported_methods_never_inherit_collection_cors
         send(&fixture.app, request("GET", "/diary", &[], String::new())).await;
     assert_eq!(status, StatusCode::OK);
     no_store(&headers);
+}
+
+#[tokio::test]
+async fn site_settings_are_session_only_and_require_csrf_for_updates() {
+    let fixture = Fixture::new();
+    let (status, headers, _) = send(
+        &fixture.app,
+        request(
+            "GET",
+            "/private/settings/site",
+            &[("x-api-key", API_KEY)],
+            String::new(),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    no_store(&headers);
+
+    let (cookie, csrf) = login(&fixture.app, ORIGIN).await;
+    let (status, headers, body) = send(
+        &fixture.app,
+        request(
+            "GET",
+            "/private/settings/site",
+            &[("cookie", &cookie)],
+            String::new(),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    no_store(&headers);
+    let value: Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(value["data"]["name"], "memento");
+
+    let update = json!({
+        "name": "  private site  ",
+        "slogan": "",
+        "icon": memento::config::DEFAULT_ICON,
+    })
+    .to_string();
+    let (status, _, _) = send(
+        &fixture.app,
+        request(
+            "PUT",
+            "/private/settings/site",
+            &[
+                ("content-type", "application/json"),
+                ("origin", ORIGIN),
+                ("cookie", &cookie),
+            ],
+            update.clone(),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+
+    let (status, headers, body) = send(
+        &fixture.app,
+        request(
+            "PUT",
+            "/private/settings/site",
+            &[
+                ("content-type", "application/json"),
+                ("origin", ORIGIN),
+                ("cookie", &cookie),
+                ("x-csrf-token", &csrf),
+            ],
+            update,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    no_store(&headers);
+    let value: Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(value["data"]["name"], "private site");
+    assert_eq!(value["data"]["slogan"], "");
+
+    let (status, _, _) = send(
+        &fixture.app,
+        request(
+            "PUT",
+            "/private/settings/site",
+            &[
+                ("content-type", "application/json"),
+                ("origin", ORIGIN),
+                ("cookie", &cookie),
+                ("x-csrf-token", &csrf),
+            ],
+            json!({"name":"x","slogan":"y","icon":memento::config::DEFAULT_ICON,"extra":true})
+                .to_string(),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+
+    let (status, _, _) = send(
+        &fixture.app,
+        request(
+            "PUT",
+            "/private/settings/site",
+            &[
+                ("content-type", "application/json"),
+                ("origin", ORIGIN),
+                ("cookie", &cookie),
+                ("x-csrf-token", &csrf),
+            ],
+            json!({"name":"missing fields"}).to_string(),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
 }
 
 fn cookie_attributes(headers: &HeaderMap, secure: bool, clearing: bool) -> String {

@@ -3,8 +3,6 @@
 
   const $ = (id) => document.getElementById(id);
   let session = null;
-  let challenge = null;
-  let owner = null;
   let busy = false;
   let page = 1;
   let filters = { sort: 'desc' };
@@ -17,9 +15,6 @@
   let conflicted = false;
 
   function syncButtons() {
-    $('loginButton').disabled = busy;
-    $('totpButton').disabled = busy;
-    $('backToPassword').disabled = busy;
     document.querySelectorAll('[data-write]').forEach((button) => {
       button.disabled = busy || listLoading || !session;
     });
@@ -36,28 +31,12 @@
     $('entries').setAttribute('aria-busy', 'false');
   }
 
-  function resetLogin() {
-    challenge = null;
-    $('password').value = '';
-    $('code').value = '';
-    $('loginError').textContent = '';
-    $('totpError').textContent = '';
-    $('loginForm').hidden = false;
-    $('totpForm').hidden = true;
-  }
-
-  function signedOut(message) {
+  function redirectToLogin() {
     session = null;
-    resetLogin();
     invalidateList();
     versionController?.abort();
-    $('entries').replaceChildren();
     $('workspace').hidden = true;
-    $('account').hidden = true;
-    $('loginPanel').hidden = false;
-    $('notice').textContent = message;
-    syncButtons();
-    $('username').focus();
+    window.location.replace('/login?next=%2Fdiary');
   }
 
   async function request(path, { method = 'GET', body, version, signal } = {}) {
@@ -109,7 +88,7 @@
     }
     $(target).textContent = message;
     if (target === 'listError') $('retryList').hidden = false;
-    if (error.status === 401 && session) signedOut('会话已过期，请重新登录。未提交的草稿仍保留在本页。');
+    if (error.status === 401 && session) redirectToLogin();
   }
 
   function count(textarea, output) {
@@ -251,17 +230,12 @@
   }
 
   function signedIn(data) {
-    // 草稿只在同一用户重新登录时恢复，不交给其他账号。
-    if (owner !== null && owner !== data.username) {
-      $('newContent').value = '';
-      closeEditor();
+    if (typeof data?.username !== 'string' || typeof data?.csrf_token !== 'string' || !data.csrf_token) {
+      throw new Error('会话响应无效，请刷新后重试。');
     }
-    owner = data.username;
     session = data;
-    resetLogin();
-    $('loginPanel').hidden = true;
     $('workspace').hidden = false;
-    $('account').hidden = false;
+    $('sessionTools').hidden = false;
     $('accountName').textContent = data.username;
     $('notice').textContent = '已登录。草稿仅保留在当前页面，不会自动保存。';
     count('newContent', 'newCount');
@@ -269,62 +243,6 @@
     loadList();
     if (session) $(editing ? 'editContent' : 'newContent').focus();
   }
-
-  $('loginForm').addEventListener('submit', async (event) => {
-    event.preventDefault();
-    if (busy || challenge || session) return;
-    busy = true;
-    syncButtons();
-    $('loginError').textContent = '';
-    try {
-      const data = await request('/session', { method: 'POST', body: { username: $('username').value, password: $('password').value } });
-      if (data?.requires_totp !== true || typeof data.challenge !== 'string' || !/^[a-f0-9]{64}$/i.test(data.challenge)) {
-        throw new Error('登录响应无效，请重新验证密码。');
-      }
-      challenge = data.challenge;
-      $('password').value = '';
-      $('code').value = '';
-      $('loginForm').hidden = true;
-      $('totpForm').hidden = false;
-      $('notice').textContent = '密码验证完成，请输入验证码；尚未登录。';
-      $('code').focus();
-    } catch (error) { failure(error, 'loginError'); }
-    finally { busy = false; syncButtons(); }
-  });
-
-  $('totpForm').addEventListener('submit', async (event) => {
-    event.preventDefault();
-    if (busy || !challenge || session) return;
-    const code = $('code').value;
-    if (!/^[0-9]{6}$/.test(code)) {
-      $('totpError').textContent = '请输入 6 位数字验证码。';
-      $('code').focus();
-      return;
-    }
-    busy = true;
-    syncButtons();
-    $('totpError').textContent = '';
-    try {
-      const data = await request('/session', { method: 'POST', body: { challenge, code } });
-      if (typeof data?.username !== 'string' || typeof data?.csrf_token !== 'string' || !data.csrf_token) {
-        throw new Error('登录响应无效，请返回上一步重新登录。');
-      }
-      signedIn(data);
-    } catch (error) {
-      if (error.status === 401) {
-        $('totpError').textContent = '验证码无效或验证请求已失效。可重试当前验证码；若已超过 5 分钟或累计错误 5 次，请返回上一步重新验证密码。';
-      } else { failure(error, 'totpError'); }
-      $('code').value = '';
-      $('code').focus();
-    } finally { busy = false; syncButtons(); }
-  });
-
-  $('backToPassword').addEventListener('click', () => {
-    if (busy) return;
-    resetLogin();
-    $('notice').textContent = '请重新验证密码。未提交的日记草稿仍保留在本页。';
-    $('password').focus();
-  });
 
   $('logout').addEventListener('click', async () => {
     if (busy || !session || !window.confirm('退出登录？服务器确认退出后，当前页面的未提交草稿将被清除。')) return;
@@ -340,8 +258,8 @@
       await request('/session', { method: 'DELETE' });
       $('newContent').value = '';
       closeEditor();
-      owner = null;
-      signedOut('已退出登录。');
+      session = null;
+      window.location.replace('/login?next=%2Fdiary');
     } catch (error) {
       $('notice').textContent = `未确认退出，登录态和草稿暂时保留。${error.message}`;
     } finally { busy = false; syncButtons(); }
@@ -447,9 +365,11 @@
     if ($('newContent').value || editing) { event.preventDefault(); event.returnValue = ''; }
   });
 
-  resetLogin();
   request('/session').then(signedIn).catch((error) => {
-    signedOut(error.status === 401 ? '请登录后阅读和书写日记。' : '无法检查会话，可尝试登录。');
-    if (error.status !== 401) failure(error, 'loginError');
+    if (error.status === 401) {
+      redirectToLogin();
+      return;
+    }
+    $('notice').textContent = error.message || '无法检查会话，请刷新后重试。';
   });
 })();
