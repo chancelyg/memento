@@ -138,7 +138,7 @@ schema v3 的 `browser_totp_state` 按 credential_hash 保存 last_used_step。O
 
 ## 管理员站点设置
 
-`/admin` 是公开可加载但不含设置值的页面壳；脚本先检查 `/session`，无有效会话时跳到 `/login?next=%2Fadmin`。登录页只接受 `/diary` 或 `/admin` 作为 next，默认进入 `/admin`。`/`、`/diary`、`/login`、`/admin` 的账户入口也会通过 `/session` 在“登录”和“管理”之间切换。
+`/admin` 是公开可加载但不含设置值的页面壳；脚本先检查 `/session`，无有效会话时跳到 `/login?next=%2Fadmin`。登录页只接受 `/diary` 或 `/admin` 作为 next，默认进入 `/admin`。`/`、`/diary`、`/login`、`/admin` 的共享导航通过 `/session` 控制私有入口：匿名或探测失败时隐藏日记入口并显示“登录”，有效会话下显示日记入口并将账户入口切为“管理”；操作顺序为收藏、日记、账户入口、主题按钮。
 
 | 方法 | 条件与请求体 | 成功响应 |
 |---|---|---|

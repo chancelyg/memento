@@ -99,6 +99,7 @@ def main():
             assert evaluate('(async()=>((await fetch("/api/diaries",{headers:{"X-API-Key":"not-configured"}})).status===401))()')
             wait('document.getElementById("shellAccount").textContent==="登录"')
             assert evaluate('document.getElementById("username").value==="admin" && document.getElementById("totpForm").hidden && document.getElementById("shellAccount").getAttribute("href")==="/login"')
+            assert evaluate('(()=>{const diary=document.querySelector("[data-nav-page=diary]"),items=[...document.querySelector(".site-nav").children].filter((item)=>item.matches(".site-link,.site-account,.theme-toggle"));return diary.hidden && items[0].textContent.trim()==="收藏" && items[1]===diary && items[2].textContent.trim()==="登录" && items[3].id==="themeToggle"})()')
             browser("fill", "#password", password)
             browser("click", "#loginButton")
             wait('!document.getElementById("totpForm").hidden')
@@ -117,7 +118,7 @@ def main():
             browser("click", "#totpButton")
             wait('location.pathname==="/diary" && !document.getElementById("workspace").hidden && document.getElementById("entries").getAttribute("aria-busy")==="false"')
             wait('document.getElementById("shellAccount").textContent==="管理"')
-            assert evaluate('document.getElementById("shellAccount").getAttribute("href")==="/admin"')
+            assert evaluate('(()=>{const diary=document.querySelector("[data-nav-page=diary]"),items=[...document.querySelector(".site-nav").children].filter((item)=>item.matches(".site-link,.site-account,.theme-toggle"));return !diary.hidden && document.getElementById("shellAccount").getAttribute("href")==="/admin" && items[0].textContent.trim()==="收藏" && items[1]===diary && items[2].textContent.trim()==="管理" && items[3].id==="themeToggle"})()')
             browser("set", "viewport", "1280", "900")
             print("PASS release assets and development password + TOTP browser login")
 
@@ -139,6 +140,15 @@ def main():
             browser("open", origin + "/diary")
             wait('!document.getElementById("workspace").hidden && document.getElementById("entries").getAttribute("aria-busy")==="false"')
             browser("set", "viewport", "1280", "900")
+
+            assert evaluate('(()=>{const start=document.getElementById("startDate");start.value="2024-01-31";start.dispatchEvent(new Event("change",{bubbles:true}));return document.getElementById("endDate").value==="2024-03-02" && document.getElementById("sort").value==="asc"})()')
+            evaluate('window.__filterFetch=window.fetch;window.__filterUrl="";window.fetch=(url,options)=>{if(String(url).startsWith("/private/diaries?"))window.__filterUrl=String(url);return window.__filterFetch(url,options)};true')
+            browser("click", '#filterForm button[type="submit"]')
+            wait('window.__filterUrl.includes("start_date=2024-01-31") && window.__filterUrl.includes("end_date=2024-03-02") && window.__filterUrl.includes("sort=asc")')
+            evaluate('window.fetch=window.__filterFetch;delete window.__filterFetch;true')
+            browser("click", "#resetFilters")
+            wait('document.getElementById("entries").getAttribute("aria-busy")==="false"')
+            print("PASS automatic 31-day diary range and oldest-first filter")
 
             browser("fill", "#newContent", 'synthetic <img src=x onerror="window.__xss=1"> 😀')
             browser("click", '#createForm button[type="submit"]')

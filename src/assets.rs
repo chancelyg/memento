@@ -164,4 +164,23 @@ mod tests {
             assert!(!html.contains("{{ICON}}"), "{path}");
         }
     }
+
+    #[test]
+    fn all_dynamic_page_templates_share_private_navigation_order() {
+        for path in ["index.html", "diary.html", "login.html", "admin.html"] {
+            let asset = StaticAssets::get(path).expect("page embedded");
+            let html = std::str::from_utf8(&asset.data).unwrap();
+            let collection = html.find("data-nav-page=\"collection\"").unwrap();
+            let diary = html
+                .find("data-nav-page=\"diary\" data-session-only href=\"/diary\" hidden")
+                .unwrap();
+            let account = html.find("id=\"shellAccount\"").unwrap();
+            let theme = html.find("id=\"themeToggle\"").unwrap();
+
+            assert!(
+                collection < diary && diary < account && account < theme,
+                "{path}"
+            );
+        }
+    }
 }

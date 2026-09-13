@@ -20,10 +20,9 @@
         <span class="site-brand__name">{{SITE_NAME}}</span>
       </a>
       <a class="site-link" data-nav-page="collection" href="/">收藏</a>
-      <a class="site-link" data-nav-page="diary" href="/diary">日记</a>
-      <div class="nav-future" aria-hidden="true"></div>
+      <a class="site-link" data-nav-page="diary" data-session-only href="/diary" hidden>日记</a>
+      <a id="shellAccount" class="site-account" href="/login">登录</a>
       <button id="themeToggle" class="theme-toggle" type="button" aria-label="切换浅色 / 深色主题" title="切换主题">☾</button>
-      <a id="shellAccount" class="site-account" href="/login">账户</a>
     </nav>
   </header>
   <main class="account-main">

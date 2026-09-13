@@ -341,6 +341,26 @@
   });
   $('newContent').addEventListener('input', () => count('newContent', 'newCount'));
   $('editContent').addEventListener('input', () => count('editContent', 'editCount'));
+  $('startDate').addEventListener('change', () => {
+    const start = $('startDate').value;
+    if (!start) return;
+    $('sort').value = 'asc';
+    const [year, month, day] = start.split('-').map(Number);
+    const end = new Date(0);
+    end.setUTCHours(0, 0, 0, 0);
+    end.setUTCFullYear(year, month - 1, day);
+    end.setUTCDate(end.getUTCDate() + 31);
+    if (end.getUTCFullYear() > 9999) {
+      $('endDate').value = '';
+      $('listError').textContent = '开始日期过晚，无法自动生成往后 31 天的结束日期。';
+      return;
+    }
+    $('endDate').value = [
+      String(end.getUTCFullYear()).padStart(4, '0'),
+      String(end.getUTCMonth() + 1).padStart(2, '0'),
+      String(end.getUTCDate()).padStart(2, '0'),
+    ].join('-');
+  });
   $('filterForm').addEventListener('submit', (event) => {
     event.preventDefault();
     if (busy) return;

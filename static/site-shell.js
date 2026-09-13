@@ -4,6 +4,7 @@
   const themeKey = 'memento-theme';
   const themeButton = document.getElementById('themeToggle');
   const account = document.getElementById('shellAccount');
+  const sessionOnlyLinks = document.querySelectorAll('[data-session-only]');
 
   function applyTheme(theme) {
     document.documentElement.dataset.theme = theme;
@@ -45,6 +46,7 @@
     if (!response.ok) return;
     const envelope = await response.json().catch(() => null);
     if (!envelope?.success || typeof envelope.data?.username !== 'string') return;
+    sessionOnlyLinks.forEach((link) => { link.hidden = false; });
     account.href = '/admin';
     account.textContent = '管理';
     account.title = `已登录：${envelope.data.username}`;

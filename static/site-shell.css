@@ -151,7 +151,6 @@ body[data-page="diary"] .site-link[data-nav-page="diary"] {
   color: var(--text);
   background: var(--accent-soft);
 }
-.nav-future { min-width: 0; }
 .theme-toggle {
   width: 42px;
   height: 42px;
