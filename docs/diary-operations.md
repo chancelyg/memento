@@ -21,9 +21,9 @@ release 二进制内嵌静态资源，但收藏、图片、日记和 session 持
 | `MEMENTO_DIARY_TIMEZONE` | 默认 `Asia/Shanghai`；可解析的时区名，非法值使启动失败 |
 | 旧 `MEMENTO_SITE_NAME` / `MEMENTO_SLOGAN` / `MEMENTO_ICON` | 已弃用；仅在所选 YAML 首次不存在时按字段 seed，文件存在后忽略 |
 
-开发与生产都必须配置密码和 TOTP，不能用开发模式绕过第二因素。默认用户名 admin。保留现有收藏 key 也意味着将日记读写权限授予所有现有 key 持有者；若他们不应接触日记，应先重新分配信任边界，本期不支持细分权限。
+开发与生产都必须配置密码和 TOTP，不能用开发模式绕过第二因素。默认用户名 admin。保留现有收藏 key 也意味着将日记读取权限授予所有现有 key 持有者；若他们不应读取日记，应先重新分配信任边界，本期不支持细分权限。
 
-反过来，不配置 key 可以独立使用浏览器登录和私有日记，收藏公开读取也不受影响；收藏写入、`/api/diaries` 全部读写和 `/api/auth/verify` 则返回 401。`Config` 内部虽仍生成旧兼容随机值，`run()` 会改传空 key 给 `AppState`，不使用或输出该随机值；不要从日志寻找临时凭据。
+反过来，不配置 key 可以独立使用浏览器登录和私有日记，收藏公开读取也不受影响；收藏写入、`/api/diaries` 只读接口和 `/api/auth/verify` 则返回 401。`Config` 内部虽仍生成旧兼容随机值，`run()` 会改传空 key 给 `AppState`，不使用或输出该随机值；不要从日志寻找临时凭据。
 
 无参数 server 启动先从系统 MEMENTO_ENV 选择模式，仅从进程 cwd 加载选定 `.env.development` 或 `.env.production`；不加载通用 `.env`、不向父目录查找，也不按二进制位置寻找。系统已有值优先，文件内的 MEMENTO_ENV 不能偷切模式。`hash-password`、`totp-secret`、`init-db` 均不加载任何 dotenv 或 YAML。样例为根目录 `.env.development.example` / `.env.production.example`，hash/secret 故意留空；`memento.example.yaml` 仅示意可跟踪的非秘密结构。实际 Env 仅供部署账号读取，勿置于 static、可下载目录、Git 或日志附件。
 
@@ -129,7 +129,7 @@ CSRF 由前端自动处理，无用户配置；API Key 分组规则不变。生�
 1. 所有路径原样代理：`/`、`/diary`、`/login`、`/admin`、`/static/`、`/session`、后台设置、两组日记与收藏 API；proxy_pass 无 URI 后缀、不 rewrite、不用 SPA fallback 吞掉 API 404。
 2. `Host $http_host` 保留外部端口，`Origin $http_origin` 原样传递，不能将来源重写为固定可信值。Cookie、X-CSRF-Token、If-Match、X-API-Key 默认透传；Set-Cookie、ETag、Cache-Control 和安全响应头保留。
 3. server 级 proxy_cache off、proxy_buffering off 覆盖敏感路径，不覆盖应用 no-store；proxy_next_upstream off 禁止上游失败自动重发 POST。不得增加 cookie 跨域 CORS。
-4. 全站 body 20m 保留收藏图片上传，精确 `/session` 8k，`/api/diaries`、`/private/diaries` 及其子路径 64k；应用另对 `/private/settings/site` 强制 512 KiB。代理拒绝可能是非 JSON。
+4. 全站 body 20m 保留收藏图片上传，精确 `/session` 8k，`/private/diaries` 及其子路径 64k；外部 `/api/diaries` 仅接受 GET。应用另对 `/private/settings/site` 强制 512 KiB。代理拒绝可能是非 JSON。
 5. map 和 limit_req_zone 在 http 上下文定义，`/session` 使用 limit_req；示例 10r/m、burst 10、nodelay、失败 429，密码及验证码 POST 共用。GET/DELETE 使用空 key 不计入限流，不阻止会话查询或退出。可按个人使用调整。直接面向客户端以 remote address 分流；若再加前置代理，另行明确可信真实 IP 边界，不盲信 XFF。应用不再有 IP 分桶或全局 hash 限流，64 个待验证 challenge 不是长期 session 限制。
 6. access_log off 避免 query/headers 被访问日志采集；error_log warn 不启用 debug/trace 或正文/认证头采样。**Nginx 错误日志和上级日志仍可能包含请求 URI**，因此限制日志权限、保留周期及错误采样，不承诺全部日志绝无隐私；同时检查 CDN/WAF/APM，不运行 curl verbose/trace 记录凭据。
 
@@ -210,7 +210,7 @@ python3 -B scripts/import_diaries.py \
 
 保真检查应在受控本地比较五字段、ID、null/旧字符串和 ledger，不把比对正文输出到日志或报告。使用备份副本或合成库演练编辑/删除后的重导、版本竞争和回滚，不能为了验收破坏真实日记。
 
-确认目标路径、环境模式、密码/TOTP、YAML 与生产 origin 配置和实际访问地址后启动服务并重新开放写入。浏览器验收两步登录、管理页读取/保存站点信息、共享导航、日记读取/筛选/编辑冲突/退出及桌面/手机页面；鉴权验收匿名拒绝、开发无 Origin 比对/生产精确 Origin、cookie/key 不可互换、两模式 CSRF、no-store、收藏公开读及 API `q` 不回归。另验无 If-Match 可写、有版本仍防冲突。真实数据环境只执行获授权操作，CRUD 演练优先使用隔离测试实例。
+确认目标路径、环境模式、密码/TOTP、YAML 与生产 origin 配置和实际访问地址后启动服务并重新开放浏览器写入。浏览器验收两步登录、管理页读取/保存站点信息、共享导航、日记读取/筛选/编辑冲突/退出及桌面/手机页面；鉴权验收匿名拒绝、开发无 Origin 比对/生产精确 Origin、cookie/key 不可互换、两模式 CSRF、no-store、收藏公开读、外部日记 API 只读及 `q` 不回归。另验浏览器无 If-Match 可写、有版本仍防冲突。真实数据环境只执行获授权操作，CRUD 演练优先使用隔离测试实例。
 
 ## 回滚与凭据轮换
 

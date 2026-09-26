@@ -2,8 +2,12 @@
 
 use axum::{
     body::Body,
+    extract::{DefaultBodyLimit, Request as AxumRequest},
     http::{HeaderMap, Request, StatusCode},
-    Router,
+    middleware,
+    response::{IntoResponse, Response},
+    routing::{get, post, put},
+    Json, Router,
 };
 use chrono::{Days, FixedOffset, NaiveDate, Utc};
 use http_body_util::BodyExt;
@@ -16,7 +20,78 @@ fn fresh_app() -> (Router, DbPool, tempfile::NamedTempFile) {
     let pool = memento::db::build_pool(tmp.path().to_str().unwrap()).unwrap();
     memento::db::init_schema(&pool).unwrap();
     let state = memento::state::AppState::new(pool.clone(), "testkey".into());
+    // Exercise the handlers shared by the writable browser routes without
+    // coupling these business-contract tests to browser login mechanics.
+    let diaries = Router::new()
+        .route(
+            "/api/diaries",
+            get(memento::handlers::diary::list).post(memento::handlers::diary::create),
+        )
+        .route(
+            "/api/diaries/{id}",
+            get(memento::handlers::diary::get)
+                .patch(memento::handlers::diary::update)
+                .delete(memento::handlers::diary::delete),
+        )
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            memento::auth::require_api_key,
+        ))
+        .layer(middleware::from_fn(test_diary_response))
+        .with_state(state.clone());
+    let favorite_writes = Router::new()
+        .route(
+            "/api/favorites",
+            post(memento::handlers::favorites::create_favorite),
+        )
+        .route(
+            "/api/favorites/{id}",
+            put(memento::handlers::favorites::update_favorite)
+                .delete(memento::handlers::favorites::delete_favorite),
+        )
+        .layer(DefaultBodyLimit::max(20 * 1024 * 1024))
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            memento::auth::require_api_key,
+        ));
+    let favorite_reads = Router::new()
+        .route(
+            "/api/favorites",
+            get(memento::handlers::favorites::list_favorites),
+        )
+        .route(
+            "/api/favorites/{id}",
+            get(memento::handlers::favorites::get_favorite),
+        );
+    let app = favorite_reads
+        .merge(favorite_writes)
+        .merge(diaries)
+        .with_state(state);
+    (app, pool, tmp)
+}
+
+fn production_app() -> (Router, DbPool, tempfile::NamedTempFile) {
+    let tmp = tempfile::NamedTempFile::new().unwrap();
+    let pool = memento::db::build_pool(tmp.path().to_str().unwrap()).unwrap();
+    memento::db::init_schema(&pool).unwrap();
+    let state = memento::state::AppState::new(pool.clone(), "testkey".into());
     (memento::build_router(state), pool, tmp)
+}
+
+async fn test_diary_response(request: AxumRequest, next: middleware::Next) -> Response {
+    let mut response = next.run(request).await;
+    if response.status() == StatusCode::METHOD_NOT_ALLOWED {
+        response = (
+            StatusCode::METHOD_NOT_ALLOWED,
+            Json(memento::error::error_envelope("method not allowed")),
+        )
+            .into_response();
+    }
+    response.headers_mut().insert(
+        "cache-control",
+        "no-store".parse().expect("static header is valid"),
+    );
+    response
 }
 
 fn request(method: &str, uri: &str, body: Value, version: Option<&str>) -> Request<Body> {
@@ -181,6 +256,37 @@ async fn all_diary_routes_require_key_even_for_reads() {
             }
             diary_response(&app, req, StatusCode::UNAUTHORIZED).await;
         }
+    }
+}
+
+#[tokio::test]
+async fn external_diary_api_exposes_only_authenticated_reads() {
+    let (app, pool, _tmp) = production_app();
+    let id = seed(&pool, "read only", "2026-09-26").await;
+
+    for uri in [
+        "/api/diaries",
+        "/api/diaries?q=read%20only",
+        &format!("/api/diaries/{id}"),
+    ] {
+        diary_response(&app, request("GET", uri, Value::Null, None), StatusCode::OK).await;
+    }
+
+    for (method, uri, body) in [
+        ("POST", "/api/diaries".to_owned(), json!({"content":"new"})),
+        (
+            "PATCH",
+            format!("/api/diaries/{id}"),
+            json!({"content":"changed"}),
+        ),
+        ("DELETE", format!("/api/diaries/{id}"), Value::Null),
+    ] {
+        diary_response(
+            &app,
+            request(method, &uri, body, Some("\"1\"")),
+            StatusCode::METHOD_NOT_ALLOWED,
+        )
+        .await;
     }
 }
 

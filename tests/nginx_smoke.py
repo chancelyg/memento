@@ -130,13 +130,20 @@ def run_case(tls):
             status, _, data = request('GET', '/api/diaries', headers={'X-API-Key': key})
             assert status == 200
             item = json.loads(data)['data']['items'][0]
-            assert request('PATCH', '/api/diaries/' + str(item['id']), {'content': 'synthetic changed'}, {'X-API-Key': key})[0] == 200
-            assert request('DELETE', '/api/diaries/' + str(item['id']), headers={'X-API-Key': key})[0] == 204
+            detail = '/api/diaries/' + str(item['id'])
+            assert request('GET', detail, headers={'X-API-Key': key})[0] == 200
+            assert request('GET', '/api/diaries?q=synthetic', headers={'X-API-Key': key})[0] == 200
+            assert request('POST', '/api/diaries', {'content': 'blocked'}, {'X-API-Key': key})[0] == 405
+            assert request('PATCH', detail, {'content': 'blocked'}, {'X-API-Key': key})[0] == 405
+            assert request('DELETE', detail, headers={'X-API-Key': key})[0] == 405
+            private_detail = '/private/diaries/' + str(item['id'])
+            assert request('PATCH', private_detail, {'content': 'synthetic changed'}, browser_headers)[0] == 200
+            assert request('DELETE', private_detail, headers=browser_headers)[0] == 204
             assert request('GET', '/api/diaries/' + str(item['id']), headers={'X-API-Key': key})[0] == 404
+            assert request('POST', '/private/diaries', headers=browser_headers, raw=b'x' * 65537)[0] == 413
             assert request('DELETE', '/session', headers=browser_headers)[0] == 204
             assert request('GET', '/private/diaries', headers={'Cookie': cookie})[0] == 401
             assert request('POST', '/session', headers={'Origin': origin}, raw=b'x' * 8193)[0] == 413
-            assert request('POST', '/api/diaries', headers={'X-API-Key': key}, raw=b'x' * 65537)[0] == 413
             statuses = [request('POST', '/session', {'username': 'qa', 'password': 'wrong'}, {'Origin': origin})[0] for _ in range(14)]
             assert 429 in statuses
             # Exhausting password/OTP attempts must not block status checks or logout.

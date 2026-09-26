@@ -4,9 +4,9 @@
 
 ## 范围与决策
 
-- 保留电影、游戏、图书收藏的公开浏览和 API Key 写入；新增单账号浏览器登录、私有日记 CRUD、Agent 日记 API 和旧库离线导入。
+- 保留电影、游戏、图书收藏的公开浏览和 API Key 写入；提供单账号浏览器登录、私有日记 CRUD、只读 Agent 日记 API 和旧库离线导入。
 - 不实现 stats、goal、独立 JSON 导入导出接口、audit 或第三方登录体系。HTTP 请求和响应使用 JSON，不等于存在额外的 `/json` 功能。
-- 日记与收藏分表，但共用 SQLite 文件、进程和当前唯一的 `MEMENTO_API_KEY`。key 持有者可读取、创建、编辑、删除全部日记，也能写收藏；没有只读 key、日记专用 scope 或按 Agent 分权。
+- 日记与收藏分表，但共用 SQLite 文件、进程和当前唯一的 `MEMENTO_API_KEY`。key 持有者可读取日记，也能写收藏；外部日记 API 不开放创建、编辑或删除，没有日记专用 key 或按 Agent 分权。
 - 服务启动未设置/空白 key 时，`run()` 向 `AppState` 传空 key，禁用收藏写入、日记 key API 和 `/api/auth/verify`，仅日志提示禁用，不输出密钥；收藏公开读取和单独配置的浏览器登录仍可用。`Config` 内部旧随机值保留兼容，但不会被启动流程用于鉴权或输出。
 - 浏览器不用 API Key。`/session` 和 `/private/diaries` 是同源浏览器专用协议，不是给第三方换取 token 的登录平台；Agent 只调用 `/api/diaries`。
 - 浏览器模型严格单用户：唯一账号就是管理员，多 session 仅表示同一人的多设备/浏览器，不增加用户、角色或 RBAC。管理员 session 也用于 `/private/settings/site`，但 API Key 不能替代。
@@ -49,8 +49,8 @@ DELETE 在事务内保留正文、原日期和 `created_at`，设置 UTC RFC3339
 |---|---|
 | 收藏 GET | 继续公开 |
 | 收藏写入、`GET /api/auth/verify` | `X-API-Key` 常量时间比较 |
-| `/api/diaries` 及其详情路由 | 全部读写必须有 key；cookie 不能替代 |
-| `/private/diaries` 及其详情路由 | 全部读写必须有有效 session；key 不能替代；写入两模式均需 CSRF，生产另需精确 Origin |
+| `/api/diaries` 及其详情路由 | 仅列表、搜索和详情读取；必须有 key，cookie 不能替代；写方法为 405 |
+| `/private/diaries` 及其详情路由 | 全部读写必须有有效 session；key 不能替代；写入在 development/production 均需 CSRF，生产另需精确 Origin |
 | `/private/settings/site` | GET/PUT 必须有管理员 session；PUT 另需 CSRF，production 需精确 Origin；key 不能替代 |
 | `/session` | POST 分密码、TOTP 两步；GET 查询 session；DELETE 撤销 session |
 | `/diary` | 公开加载页面壳，不含日记数据；数据另外鉴权获取 |

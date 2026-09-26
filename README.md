@@ -8,7 +8,7 @@
 
 - 三种类型（电影、游戏、图书）共用一面墙，网页支持按类型过滤和分页；公开 API 继续支持按名称搜索。
 - 单文件二进制：SQLite 经 `rusqlite` bundled feature 编译，无系统依赖；前端经 `rust-embed` 内嵌。
-- 收藏读接口公开，收藏写接口（POST / PUT / DELETE / 上传图片）需 `X-API-Key`；日记 API 的读写都需要 key。
+- 收藏读接口公开，收藏写接口（POST / PUT / DELETE / 上传图片）需 `X-API-Key`；日记 API 仅提供需要 key 的列表、搜索和详情读取。
 - 海报图片支持三种入库方式：base64、由服务端抓取的 URL、直接上传字节。
 - 暗色前端，含详情弹窗、懒加载、明暗主题切换。
 - `/diary` 提供同源浏览器登录和日记创建、筛选、编辑、软删除；浏览器使用 session cookie，不使用 API Key。删除后不再显示，但正文仍保留在数据库中，本期无恢复、回收站或永久清除 API；收藏保持硬删除，二者均不承诺安全擦除。
@@ -17,11 +17,11 @@
 ### 日记文档
 
 - [设计说明](docs/diary-design.md)：日期编排、权限隔离、session、安全边界与迁移决策。
-- [接口文档](docs/diary-api.md)：Agent `/api/diaries`、浏览器 `/private/diaries` 和 `/session`，分页、ETag、If-Match 及错误处理。
+- [接口文档](docs/diary-api.md)：只读 Agent `/api/diaries`、可写浏览器 `/private/diaries` 和 `/session`，分页、ETag、If-Match 及错误处理。
 - [部署与迁移](docs/diary-operations.md)：双环境配置、bcrypt/TOTP 设置、HTTP 内网反代与可选 HTTPS、旧库 dry-run/apply、一致备份与回滚和验证入口；不代表生产已迁移或上线。
 - [管理后台与 YAML 设置](docs/admin-settings-design.md)：严格单用户边界、配置分层、站点字段、后台接口、原子保存及跨平台限制。
 
-没有未删除日记时，新篇取业务时区今天（默认 `Asia/Shanghai`），否则按未删除日记的最大日期加一天；删除末篇后可能重用日期，这是预期行为。全部软删不代表物理空表。编辑仅允许正文，PATCH/DELETE 的 `If-Match` 可选：不传操作最新记录，提供时格式错误返回 400、未删除记录版本过时返回 412；不再因缺头返回 428。网页仍带版本防冲突，不自动合并。已删除 ID 在前置校验通过后返回 404。当前单个 API Key 同时拥有收藏写权限和全部日记读写权限，不能细分授权。
+没有未删除日记时，新篇取业务时区今天（默认 `Asia/Shanghai`），否则按未删除日记的最大日期加一天；删除末篇后可能重用日期，这是预期行为。全部软删不代表物理空表。浏览器编辑仅允许正文，PATCH/DELETE 的 `If-Match` 可选：不传操作最新记录，提供时格式错误返回 400、未删除记录版本过时返回 412；不再因缺头返回 428。网页仍带版本防冲突，不自动合并。已删除 ID 在前置校验通过后返回 404。外部 `/api/diaries` 只允许带 API Key 的列表、搜索和详情读取，POST/PATCH/DELETE 返回 405；同一个 key 仍可写收藏。
 
 ## 运行
 
@@ -67,7 +67,7 @@ Env 只承载运行、安全、秘密和业务规则；后台可编辑的非秘�
 | 变量 | 默认值 | 说明 |
 |---|---|---|
 | `MEMENTO_ENV` | `production` | 系统环境选择 `development` / `production`；dotenv 不可切换模式。 |
-| `MEMENTO_API_KEY` | 未设置/空白则禁用 key API | 收藏写入及日记全部读写共用的 key；需要外部 API 时显式设置，浏览器可独立使用。 |
+| `MEMENTO_API_KEY` | 未设置/空白则禁用 key API | 收藏写入及日记只读接口共用的 key；需要外部 API 时显式设置，浏览器可独立使用。 |
 | `MEMENTO_DB_PATH` | 按环境 | 开发默认 `./memento.dev.db`，生产默认 `./memento.db`，相对进程 cwd。 |
 | `MEMENTO_CONFIG_PATH` | 按环境 | 开发默认 `./memento.development.yaml`，生产默认 `./memento.production.yaml`，相对 cwd；父目录须已存在。 |
 | `MEMENTO_BIND` | 按环境 | 开发默认 `0.0.0.0:23457`，生产默认 `127.0.0.1:23457`，不仅是样例值。 |
@@ -327,7 +327,7 @@ python3 scripts/seed_import.py --old http://147.79.20.135:23456 --new http://loc
 ### 安全说明
 
 - 需要外部 key API 时显式设置固定强 `MEMENTO_API_KEY`；未设置/空白会禁用这些接口，不输出或使用临时密钥。浏览器登录独立配置。
-- 收藏读取公开、写入需要 `X-API-Key`（常量时间比较）；日记 key API 全部读写受保护。后台设置只接受管理员浏览器 session，PUT 两模式均要求 CSRF，生产另要求精确 Origin，API Key 不能替代。
+- 收藏读取公开、写入需要 `X-API-Key`（常量时间比较）；日记 key API 仅提供受保护的列表、搜索和详情读取。后台设置只接受管理员浏览器 session，PUT 两模式均要求 CSRF，生产另要求精确 Origin，API Key 不能替代。
 - `url` 字段服务端强制为 `http(s)`，拒绝 `javascript:` / `data:`。
 - 抓取 `image_url` 前会解析域名并拒绝指向私网 / 回环 / 链路本地 / CGNAT 的地址，且禁用重定向（防 SSRF）。
 - 上传或抓取的图片按真实魔数（jpeg/png/gif/webp/bmp/avif）判定 MIME，不信任客户端声明的 Content-Type。

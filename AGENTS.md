@@ -2,7 +2,7 @@
 
 ## 产品与边界
 
-- Rust 单二进制个人收藏海报墙与私有连续日记。电影／游戏／图书收藏公开浏览；日记仅本人登录或持有 API Key 的程序可读写。严格单用户，唯一浏览器账号就是管理员，多 session 仅表示同一管理员的多设备/浏览器；不引入多用户、RBAC、目标、看板、审计或回收站。
+- Rust 单二进制个人收藏海报墙与私有连续日记。电影／游戏／图书收藏公开浏览；日记仅本人登录后可写，持有 API Key 的程序只能读取、搜索和读取详情。严格单用户，唯一浏览器账号就是管理员，多 session 仅表示同一管理员的多设备/浏览器；不引入多用户、RBAC、目标、看板、审计或回收站。
 - release 内嵌静态前端；收藏、海报、日记和会话持久化在外部 SQLite，管理员可编辑的非秘密功能设置持久化在外部 YAML，**数据与设置均不打包进二进制**。`static/` 保持原生 HTML/CSS/JS，无 npm 或打包器。
 - 收藏写入方先搜索比对，再创建或按 ID 更新；无自动去重/upsert，创建必须带海报。日记不去重：正文相同也可表示不同记录。
 - 日记日期是产品规则：未删除集合（`deleted_at IS NULL`）为空时用业务时区今天，否则用**未删除最大 `create_date` + 1 天**，允许未来日期，不追随实际提交时间；删除末篇后再次创建可重用日期，全部软删后重新用今天，但不代表物理空表。默认 `Asia/Shanghai`，`MEMENTO_DIARY_TIMEZONE` 接受 IANA 时区。不得改为“每次提交都用今天”。
@@ -32,14 +32,14 @@
 
 ## 认证、数据与兼容性
 
-- `/api/favorites` 公开读、API Key 写；`/api/diaries` **所有读写均需 `X-API-Key`**；`/private/diaries` 是同源浏览器会话入口。`GET/PUT /private/settings/site` 仅接受管理员 session，PUT 还需 CSRF、production Origin；API Key 不能替代。Cookie 与 API Key 不互相替代，也不因浏览器登录开放收藏写入。
+- `/api/favorites` 公开读、API Key 写；`/api/diaries` 只开放需要 `X-API-Key` 的列表、搜索和详情 GET，POST/PATCH/DELETE 为 405；`/private/diaries` 是保留完整 CRUD 的同源浏览器会话入口。`GET/PUT /private/settings/site` 仅接受管理员 session，PUT 还需 CSRF、production Origin；API Key 不能替代。Cookie 与 API Key 不互相替代，也不因浏览器登录开放收藏写入。
 - `/session` 的 POST/GET/DELETE 仅服务浏览器，不是第三方登录体系。两模式都必须配置 bcrypt `MEMENTO_PASSWORD_HASH` 和 Base32 `MEMENTO_TOTP_SECRET`（解码至少 20 字节），username 默认 admin。旧 Argon2 hash 不兼容，重生 hash 但不改日记/收藏数据。CLI hash-password（含 --stdin）使用 bcrypt DEFAULT_COST=12，密码非空且最多 72 UTF-8 字节以防截断，不另设 12 字符最低规则；totp-secret 生成新 20 字节 Base32，仅显示到用户终端，本地安全配置 6 位/SHA1/30 秒验证器，允许前后各 1 步，不依赖域名。
 - 每次登录先 POST `/session` 的 username/password，正确仅返回 data{requires_totp:true,challenge}、无 Cookie；再 POST 同 URL 的 {challenge,code} 才返回 data{username,csrf_token} 与 Cookie。挑战 5 分钟、最多 5 次错误 OTP、64 并行待验证上限，仅限制短期 challenge。无恢复码或自助账户管理；丢设备由运维更换 secret，使旧 session 失效。
 - 会话随机 token 只存 SHA256 摘要，`MEMENTO_SESSION_TTL_DAYS` 默认 7 且为正整数，不滑动续期，不限制有效 session 为 32 个。退出持久删除；用户名/hash/TOTP 变动踢旧会话，origin 变动不踢。schema v3 新增 browser_totp_state(credential_hash TEXT PRIMARY KEY,last_used_step INTEGER NOT NULL)：同一凭据只接受更大的 OTP 时间步，与 session 插入在同一 IMMEDIATE 事务提交，失败一起回滚。不得跨 challenge、重启或注销重用验证码；窗口内 401 提示等下一个验证码并重新登录，接受超前一步后须等更大时间步，时钟回拨可能暂时拒绝。保留前后各 1 步容差，无手动全局绕过开关；不是审计/账户平台。数据库失败必须拒绝授权，不能把撤销失败当成功。
 - development 不要求 Origin/Host 比对，Cookie HttpOnly/SameSite=Lax/无 Secure；production 必须显式 canonical HTTP(S) `MEMENTO_PUBLIC_ORIGIN` 并精确校验浏览器 unsafe Origin，Cookie HttpOnly/SameSite=Strict，https origin 才 Secure。HTTP 内网生产反代可用，不强制域名/证书；公网推荐 HTTPS。两模式登录后 unsafe 均保留 session 绑定 CSRF，由前端自动处理，无用户配置。旧收藏 permissive CORS 不扩散到 Cookie 或日记组。
 - 不保留应用 IP 分桶或全局 hash 限流，生产 `/session` 入口防滥用由 Nginx 负责；配置见 deploy/nginx，两个 http 上下文片段二选一，不能重复 zone/upstream。不重写 Origin/路径，不丢 Host 端口，不缓存或重试 POST，不记录敏感请求。
-- 未配置/空白 `MEMENTO_API_KEY` 时，二进制禁用外部 key 接口，不输出临时 key；公开海报墙和已配置的浏览器登录仍可用。当前单 key 同时授权收藏写和日记读写，不是只写/分 scope 凭据。
-- 日记新正文 trim 后非空、最多 10000 Unicode 字符，请求 64 KiB；登录 body 8 KiB。PATCH/DELETE 的 `If-Match: "<version>"` 可选，无头操作最新记录，不返回缺头 428；提供时格式错误 400、未删除记录版本陈旧 412。网页仍传版本防冲突，不自动合并。已删 ID 在前置校验正确时 PATCH/重复 DELETE 为 404；同版本并发 DELETE 仅一个 204、另一个 404；版本溢出 409 且不删除。POST 无幂等键，未知写入结果先核实，不能自动重试导致多篇。
+- 未配置/空白 `MEMENTO_API_KEY` 时，二进制禁用外部 key 接口，不输出临时 key；公开海报墙和已配置的浏览器登录仍可用。当前单 key 同时授权收藏写和日记读取，不是只写/分 scope 凭据。
+- 浏览器日记新正文 trim 后非空、最多 10000 Unicode 字符，请求 64 KiB；登录 body 8 KiB。`/private/diaries` 的 PATCH/DELETE 接受可选 `If-Match: "<version>"`，无头操作最新记录，不返回缺头 428；提供时格式错误 400、未删除记录版本陈旧 412。网页仍传版本防冲突，不自动合并。已删 ID 在前置校验正确时 PATCH/重复 DELETE 为 404；同版本并发 DELETE 仅一个 204、另一个 404；版本溢出 409 且不删除。浏览器 POST 无幂等键，未知写入结果先核实，不能自动重试导致多篇。
 - 旧日记可有重复日期、空白正文和 NULL 时间戳；迁移保留全部原字段，读取支持旧时间字符串，不能为了新提交校验清洗旧数据或增加日期唯一约束。
 - 收藏三类共用 `favorites`：便利字段折入 `extra`，显式 extra 同名键优先。PUT 保持部分更新；可空字段显式 null 清空，不适用于 name/type/图片/sort_date。`extra` 是事务内浅合并，不是 JSON Merge Patch；null/空对象不清空整体，键值 null 不是删除键。
 - 收藏固定 `sort_date DESC,id DESC` 排序；创建缺省 UTC 当天，更新不自动推进。收藏日期目前未严格校验，不能用日记的严格日期假设处理旧收藏。

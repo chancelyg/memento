@@ -132,16 +132,8 @@ pub fn build_router(state: AppState) -> Router {
             browser::require_session,
         ));
     let diary_api = Router::new()
-        .route(
-            "/api/diaries",
-            get(handlers::diary::list).post(handlers::diary::create),
-        )
-        .route(
-            "/api/diaries/{id}",
-            get(handlers::diary::get)
-                .patch(handlers::diary::update)
-                .delete(handlers::diary::delete),
-        )
+        .route("/api/diaries", get(handlers::diary::list))
+        .route("/api/diaries/{id}", get(handlers::diary::get))
         .layer(middleware::from_fn_with_state(
             state.clone(),
             auth::require_api_key,

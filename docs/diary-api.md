@@ -4,25 +4,32 @@
 
 ## 两组日记路由
 
-下表中的 `PREFIX` 是 `/api/diaries`（Agent）或 `/private/diaries`（同源浏览器）。两组复用相同 handler 和业务，只是鉴权不同。
+Agent 的 API Key 路由只读：
 
 | 方法与路径 | 请求 | 成功响应 |
 |---|---|---|
-| `GET PREFIX` | 查询参数见下表 | 200，`data` 为分页对象 |
-| `POST PREFIX` | JSON `{"content":"正文"}` | 201，`data` 为 DiaryDto，带 ETag |
-| `GET PREFIX/{id}` | ID 为可解析的 i64 | 200，`data` 为 DiaryDto，带 ETag |
-| `PATCH PREFIX/{id}` | JSON `{"content":"新正文"}`；可选 If-Match | 200，更新后的 DiaryDto，带新 ETag |
-| `DELETE PREFIX/{id}` | 可选 If-Match，无需正文 | 204，空 body；软删除 |
+| `GET /api/diaries` | 查询参数见下表 | 200，`data` 为分页对象 |
+| `GET /api/diaries/{id}` | ID 为可解析的 i64 | 200，`data` 为 DiaryDto，带 ETag |
 
-- `/api/diaries` 的读取和写入都要求 `X-API-Key`。不接受 cookie 替代，不要求浏览器 Origin/CSRF，不提供跨域 CORS 授权；适用于服务器端 Agent。
-- `/private/diaries` 的读取和写入都要求有效 `memento_session` cookie。POST/PATCH/DELETE 两模式都必须有该 session 的 `X-CSRF-Token`，production 另需精确 Origin；development 不比对 Origin/Host。API Key 不能替代 session 或跳过 CSRF。
-- 本期只有一个 key，兼具全部日记读写和收藏写权限；现有收藏 Agent 持有的 key 因而也能读取私有日记。不要向不应读日记的 Agent 分发此 key。
+同源浏览器路由保留完整日记操作：
+
+| 方法与路径 | 请求 | 成功响应 |
+|---|---|---|
+| `GET /private/diaries` | 查询参数见下表 | 200，`data` 为分页对象 |
+| `POST /private/diaries` | JSON `{"content":"正文"}` | 201，`data` 为 DiaryDto，带 ETag |
+| `GET /private/diaries/{id}` | ID 为可解析的 i64 | 200，`data` 为 DiaryDto，带 ETag |
+| `PATCH /private/diaries/{id}` | JSON `{"content":"新正文"}`；可选 If-Match | 200，更新后的 DiaryDto，带新 ETag |
+| `DELETE /private/diaries/{id}` | 可选 If-Match，无需正文 | 204，空 body；软删除 |
+
+- `/api/diaries` 的列表、搜索和详情读取都要求 `X-API-Key`。POST/PATCH/DELETE 未开放，正确携带 key 时返回 405；不接受 cookie 替代，不要求浏览器 Origin/CSRF，不提供跨域 CORS 授权。
+- `/private/diaries` 的读取和写入都要求有效 `memento_session` cookie。POST/PATCH/DELETE 在 development 和 production 都必须有该 session 的 `X-CSRF-Token`，production 另需精确 Origin；development 不比对 Origin/Host。API Key 不能替代 session 或跳过 CSRF。
+- 本期只有一个 key，兼具日记读取和收藏写入权限；现有收藏 Agent 持有的 key 因而也能读取私有日记。不要向不应读日记的 Agent 分发此 key。
 - 服务启动未设置或仅含空白的 `MEMENTO_API_KEY` 时，外部 key 鉴权接口全部禁用，请求返回 401；不会输出临时密钥。浏览器日记可凭独立登录配置继续使用，不能作为 Agent 绕过 key 的入口；收藏公开读取不受影响。
 - 日记没有 PUT、批量写入、按日期 upsert、stats、goal、audit 或独立 JSON 导入导出路由。GET 路由的 HEAD 使用框架的无响应正文行为，业务客户端使用上述显式方法即可。
 
 ## 响应结构
 
-JSON 成功响应为 `{"success":true,"data":...,"error":null}`；错误为 `{"success":false,"data":null,"error":"简短错误"}`。DELETE 成功不要解析 JSON；HEAD 无正文。已注册日记/session 路由的 405 经统一错误信封处理，不应将此保证外推到未知 URL、静态响应或代理错误页。
+JSON 成功响应为 `{"success":true,"data":...,"error":null}`；错误为 `{"success":false,"data":null,"error":"简短错误"}`。浏览器 DELETE 成功不要解析 JSON；HEAD 无正文。已注册日记/session 路由的 405 经统一错误信封处理，不应将此保证外推到未知 URL、静态响应或代理错误页。
 
 DiaryDto 示例：
 
@@ -60,7 +67,7 @@ DTO 保持上述六字段，不暴露内部 `deleted_at`。列表和详情均只
 
 按 `create_date`、再按 `id` 同方向排序。始终限定 `deleted_at IS NULL`，再组合 `q`、日期过滤并计数和分页；`total` 仅是过滤后未删除篇数，已删除记录不占分页位置。超出末页返回空 `items`，不改变总数。`q` 的 `%`、`_`、反斜线会转义后参数绑定，不作为 LIKE 通配符；大小写行为遵循 SQLite LIKE，不承诺完整 Unicode 大小写折叠。客户端应对参数做 URL 编码，禁止把真实搜索 URL 写入日志。
 
-## 创建与编辑
+## 浏览器创建与编辑
 
 POST/PATCH 要求 JSON 对象且只有必填字符串 `content`，不能提供 `id`、`create_date`、timestamp、`version`、`deleted_at` 或 `extra`，也不能通过这些方法恢复已删除记录。正文服务端 trim 后须为 1..10000 个 Unicode 标量值；整份 JSON 请求体最多 65536 字节（64 KiB），是与正文字符数独立的限制。缺失/错误媒体类型返回 415，错误 JSON、未知字段、空白正文或超长正文返回 400，body 超限返回 413。
 
@@ -68,13 +75,13 @@ POST/PATCH 要求 JSON 对象且只有必填字符串 `content`，不能提供 `
 
 历史空白、重复日期、超过新长度限制的正文和旧 timestamp 允许通过离线迁移保留；HTTP 新建/编辑不开放绕过规则的模式。
 
-## 软删除
+## 浏览器软删除
 
 DELETE 保留原行、正文、`create_date` 和 `created_at`，将 `deleted_at` 设为当前 UTC RFC3339 毫秒时间，`updated_at` 设为同一个值，`version` 加一。记录随后不再出现在列表、搜索、日期过滤、计数、分页或详情中，但数据库仍保留正文。这不是安全擦除，本期无恢复、回收站或永久清除 API；收藏 DELETE 仍为硬删除。
 
 ## 并发条件
 
-GET 详情、POST 成功、PATCH 成功返回 `ETag: "<version>"`。列表不带集合 ETag，可读取条目 `version`，或先 GET 详情获取 ETag。PATCH 和 DELETE 可选发送一个带双引号的正整数版本，例如 `If-Match: "1"`。网页仍发送版本防冲突，没有自动合并。
+GET 详情以及浏览器 POST/PATCH 成功返回 `ETag: "<version>"`。列表不带集合 ETag，可读取条目 `version`，或先 GET 详情获取 ETag。浏览器 PATCH 和 DELETE 可选发送一个带双引号的正整数版本，例如 `If-Match: "1"`。网页仍发送版本防冲突，没有自动合并。
 
 - 缺少 If-Match：允许对最新未删除记录操作，不返回缺头 428；调用方主动放弃版本冲突保护。
 - 未删除记录版本已变化：412，且不修改数据；重新读取并比较最新正文，让用户确认合并或删除意图后再提交，不能仅换新版本自动覆盖。
@@ -87,29 +94,17 @@ ETag 用于乐观并发，不是缓存许可；这些路由使用 `Cache-Control
 
 ## Agent 示例
 
-以下仅示例语法。`BASE` 是实际 HTTP(S) origin，内网可用 `http://<机器内网IP>:23457`，公网/不可信网络推荐 HTTPS；key 已由安全环境注入。示例会创建或更改数据，不是健康检查；不要用真实正文作为 shell 命令参数或开启 curl verbose/trace。正式客户端应在内存中编码 JSON，并关闭请求/响应内容日志。
+以下仅示例语法。`BASE` 是实际 HTTP(S) origin，内网可用 `http://<机器内网IP>:23457`，公网/不可信网络推荐 HTTPS；key 已由安全环境注入。不要开启 curl verbose/trace，正式客户端应关闭请求/响应内容日志。
 
 ```bash
 curl -i "$BASE/api/diaries?page=1&per_page=24&sort=desc" \
   -H "X-API-Key: $MEMENTO_API_KEY"
 
-curl -i -X POST "$BASE/api/diaries" \
-  -H "X-API-Key: $MEMENTO_API_KEY" \
-  -H 'Content-Type: application/json' \
-  --data '{"content":"仅作演示的新正文"}'
+curl -i "$BASE/api/diaries/42" \
+  -H "X-API-Key: $MEMENTO_API_KEY"
 ```
 
-使用刚读取的实际 ID 和版本；以下 `42`、`"1"` 只是占位示例：
-
-```bash
-curl -i -X PATCH "$BASE/api/diaries/42" \
-  -H "X-API-Key: $MEMENTO_API_KEY" \
-  -H 'If-Match: "1"' \
-  -H 'Content-Type: application/json' \
-  --data '{"content":"仅作演示的修改正文"}'
-```
-
-POST 无幂等键，也不按正文去重。超时不能证明未写入；先用鉴权列表/详情核对，不要盲目重发导致新增下一日期的重复内容。PATCH/DELETE 的结果不明时也先重新读取。
+其中 `42` 只是占位 ID，应使用列表返回的实际 ID。Agent API 不提供创建、编辑或删除；这些操作只存在于登录后的同源浏览器协议。
 
 ## 浏览器 Session
 
