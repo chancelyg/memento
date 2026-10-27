@@ -45,6 +45,7 @@ input {
 .form-card button:hover:not(:disabled) { border-color: var(--accent); }
 .form-card button:disabled { opacity: .5; cursor: not-allowed; }
 .form-card .primary { color: var(--bg); background: var(--accent); font-weight: 650; }
+#loginButton { display: block; width: 100%; margin-top: 18px; }
 .actions { margin-top: 18px; display: flex; justify-content: flex-end; gap: 12px; flex-wrap: wrap; }
 .error { color: var(--danger); overflow-wrap: anywhere; }
 .error:empty { display: none; }

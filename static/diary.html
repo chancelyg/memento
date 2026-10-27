@@ -10,6 +10,7 @@
   <link rel="stylesheet" href="/static/site-shell.css" />
   <link rel="stylesheet" href="/static/diary.css" />
   <script src="/static/site-shell.js" defer></script>
+  <script src="/static/diary-drafts.js" defer></script>
   <script src="/static/diary.js" defer></script>
 </head>
 <body data-page="diary">
@@ -30,11 +31,13 @@
     <p id="notice" role="status" aria-live="polite">正在检查登录状态…</p>
     <div id="workspace" hidden>
       <div id="sessionTools" class="session-tools" hidden><span id="accountName"></span><button id="logout" type="button" data-write>退出登录</button></div>
+      <p id="draftPrivacy" class="muted">输入时自动将草稿以明文保存在此浏览器的同源本地存储中，不会自动提交到服务器。刷新、返回或登录过期后可恢复；公共或共享设备上的其他使用者可能读取草稿，请主动退出以清除。</p>
+      <p id="draftStatus" class="muted" role="status" aria-live="polite" aria-atomic="true"></p>
       <section class="panel" aria-labelledby="createTitle">
         <p class="eyebrow">NEW ENTRY</p><h2 id="createTitle">写下一篇</h2>
         <p id="dateRule" class="muted">日期由服务端分配，不可编辑：没有未删除日记时为业务时区的今天，否则为未删除日记的最大日期加一天，允许未来日期。</p>
         <form id="createForm">
-          <label for="newContent">日记正文</label><textarea id="newContent" rows="7" aria-describedby="dateRule newCount" placeholder="今天，有什么值得记住？"></textarea>
+          <label for="newContent">日记正文</label><textarea id="newContent" rows="7" aria-describedby="dateRule newCount draftPrivacy draftStatus" placeholder="今天，有什么值得记住？"></textarea>
           <div class="actions"><span id="newCount" class="muted">0 / 10000 字符</span><button class="primary" type="submit" data-write>创建日记</button></div>
           <p id="createError" class="error" role="alert"></p>
         </form>
@@ -42,7 +45,7 @@
       <section id="editor" class="panel" hidden aria-labelledby="editTitle">
         <h2 id="editTitle" tabindex="-1">编辑日记</h2><p id="editDate" class="muted"></p>
         <form id="editForm">
-          <label for="editContent">编辑正文</label><textarea id="editContent" rows="10" aria-describedby="editCount"></textarea>
+          <label for="editContent">编辑正文</label><textarea id="editContent" rows="10" aria-describedby="editCount draftPrivacy draftStatus"></textarea>
           <p id="editCount" class="muted"></p>
           <p id="editError" class="error" role="alert"></p>
           <div id="conflict" hidden>

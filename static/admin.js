@@ -29,6 +29,7 @@
       if (method !== 'GET') throw new Error('连接中断，保存结果未知。请先重新读取设置，不要直接重复提交。');
       throw error;
     }
+    if (response.status === 204) return null;
     const envelope = await response.json().catch(() => null);
     if (!response.ok || !envelope?.success) {
       const error = new Error(typeof envelope?.error === 'string' ? envelope.error : `请求失败（${response.status}），请重试。`);
@@ -93,7 +94,7 @@
   });
 
   $('logout').addEventListener('click', async () => {
-    if (busy || !csrfToken || !window.confirm('退出登录？')) return;
+    if (busy || !csrfToken || !window.confirm('退出登录？服务器确认退出后，此浏览器保存的新建和编辑日记本地草稿都将清除。')) return;
     busy = true;
     $('logout').disabled = true;
     $('saveSettings').disabled = true;
@@ -102,8 +103,13 @@
     try {
       await request('/session', { method: 'DELETE' });
       csrfToken = null;
+      $('settingsForm').hidden = true;
+      if (!window.DiaryDrafts.clearAll()) {
+        window.alert('服务器已确认退出，但本地草稿清除失败，浏览器中可能仍有明文正文。请手动清理本站本地存储，尤其是在公共设备上。');
+      }
       window.location.replace('/login?next=%2Fadmin');
     } catch (error) {
+      if (error.status === 401) return redirectToLogin();
       $('adminStatus').textContent = '未确认退出。';
       $('settingsError').textContent = error.message || '退出失败，请重试。';
       busy = false;

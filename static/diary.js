@@ -13,6 +13,69 @@
   let editing = null;
   let latest = null;
   let conflicted = false;
+  const drafts = window.DiaryDrafts;
+  const draftMessages = { new: '', edit: '' };
+  const draftErrors = { new: false, edit: false };
+
+  function draftStatus(kind, message, error = false) {
+    draftMessages[kind] = message;
+    draftErrors[kind] = error;
+    $('draftStatus').textContent = Object.values(draftMessages).filter(Boolean).join(' ');
+    $('draftStatus').classList.toggle('error', Object.values(draftErrors).some(Boolean));
+  }
+
+  function clearDraft(kind) {
+    try {
+      localStorage.removeItem(drafts[`${kind}Key`]);
+      draftStatus(kind, `${kind === 'new' ? '新建' : '编辑'}本地草稿已清除。`);
+      return true;
+    } catch {
+      draftStatus(kind, `${kind === 'new' ? '新建' : '编辑'}本地草稿清除失败，浏览器中可能仍有明文正文；请手动清理本站本地存储。`, true);
+      return false;
+    }
+  }
+
+  function saveDraft(kind) {
+    if (!session || (kind === 'edit' && !editing)) return;
+    const label = kind === 'new' ? '新建' : '编辑';
+    const value = $(kind === 'new' ? 'newContent' : 'editContent').value;
+    if (kind === 'new' && value === '') { clearDraft(kind); return; }
+    try {
+      localStorage.setItem(drafts[`${kind}Key`], kind === 'new' ? value : JSON.stringify({
+        id: editing.id, create_date: editing.create_date, version: editing.version, content: value,
+      }));
+      draftStatus(kind, `${label}草稿已保存到此浏览器本地，不代表服务器已保存。`);
+    } catch {
+      draftStatus(kind, `${label}草稿本地保存失败：存储不可用或空间已满。正文仅保留在当前页面，请先复制备份，勿刷新或离开。`, true);
+    }
+  }
+
+  function restoreDrafts() {
+    try {
+      $('newContent').value = localStorage.getItem(drafts.newKey) ?? '';
+      draftStatus('new', $('newContent').value ? '已恢复新建本地草稿；若上次提交结果未知，请先核实记录，不要重复提交。' : '新建正文输入时将保存到此浏览器本地。');
+    } catch {
+      draftStatus('new', '无法读取新建本地草稿：本地存储不可用，请勿依赖自动保存。', true);
+    }
+    try {
+      const raw = localStorage.getItem(drafts.editKey);
+      if (raw === null) {
+        closeEditor();
+        draftStatus('edit', '');
+      } else {
+        const item = JSON.parse(raw);
+        if (!item || !Number.isSafeInteger(item.id) || item.id <= 0
+          || !Number.isSafeInteger(item.version) || item.version <= 0
+          || typeof item.create_date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(item.create_date)
+          || typeof item.content !== 'string') throw new Error('invalid draft');
+        showEditor(item);
+        draftStatus('edit', '已恢复编辑本地草稿并保留原版本号；若上次提交结果未知，请先核实记录。');
+      }
+    } catch {
+      draftStatus('edit', '编辑草稿读取失败：存储不可用或草稿数据损坏，未清除本地数据；请先备份，勿依赖自动恢复。', true);
+    }
+    count('newContent', 'newCount');
+  }
 
   function syncButtons() {
     document.querySelectorAll('[data-write]').forEach((button) => {
@@ -133,14 +196,20 @@
   function openEditor(item) {
     if (busy) return;
     if (editing && !window.confirm('放弃当前编辑草稿，改为编辑这篇日记？')) return;
+    if (editing && !clearDraft('edit')) return;
+    showEditor(item);
+    saveDraft('edit');
+    $('editContent').focus();
+  }
+
+  function showEditor(item) {
     closeEditor();
-    editing = { ...item };
+    editing = { id: item.id, create_date: item.create_date, version: item.version };
     $('editDate').textContent = `日记日期：${item.create_date}（不可编辑）`;
     $('editContent').value = item.content;
     count('editContent', 'editCount');
     $('editor').hidden = false;
     syncButtons();
-    $('editContent').focus();
   }
 
   function renderItems(items) {
@@ -170,7 +239,7 @@
         if (busy || !window.confirm(`删除 ${item.create_date} 的日记？删除后不再显示，正文仍保留在数据库中，本期不提供恢复功能。${editing?.id === item.id ? '这篇日记的编辑草稿也会被清除。' : ''}`)) return;
         mutate('listError', async () => {
           await request(`/private/diaries/${encodeURIComponent(item.id)}`, { method: 'DELETE', version: item.version });
-          if (editing?.id === item.id) closeEditor();
+          if (editing?.id === item.id) { clearDraft('edit'); closeEditor(); }
           $('notice').textContent = '日记已删除，不再显示；正文仍保留在数据库中，本期不提供恢复功能。';
           loadList();
           $('archiveTitle').focus();
@@ -237,15 +306,15 @@
     $('workspace').hidden = false;
     $('sessionTools').hidden = false;
     $('accountName').textContent = data.username;
-    $('notice').textContent = '已登录。草稿仅保留在当前页面，不会自动保存。';
-    count('newContent', 'newCount');
+    $('notice').textContent = '已登录。日记只有提交成功后才会保存到服务器。';
+    restoreDrafts();
     syncButtons();
     loadList();
     if (session) $(editing ? 'editContent' : 'newContent').focus();
   }
 
   $('logout').addEventListener('click', async () => {
-    if (busy || !session || !window.confirm('退出登录？服务器确认退出后，当前页面的未提交草稿将被清除。')) return;
+    if (busy || !session || !window.confirm('退出登录？服务器确认退出后，此浏览器保存的新建和编辑本地草稿都将清除。')) return;
     busy = true;
     invalidateList();
     versionController?.abort();
@@ -256,11 +325,16 @@
     syncButtons();
     try {
       await request('/session', { method: 'DELETE' });
+      session = null;
       $('newContent').value = '';
       closeEditor();
-      session = null;
+      $('workspace').hidden = true;
+      if (!drafts.clearAll()) {
+        window.alert('服务器已确认退出，但本地草稿清除失败，浏览器中可能仍有明文正文。请手动清理本站本地存储，尤其是在公共设备上。');
+      }
       window.location.replace('/login?next=%2Fdiary');
     } catch (error) {
+      if (error.status === 401) { redirectToLogin(); return; }
       $('notice').textContent = `未确认退出，登录态和草稿暂时保留。${error.message}`;
     } finally { busy = false; syncButtons(); }
   });
@@ -272,6 +346,7 @@
       $('newContent').readOnly = true;
       try {
         const item = await request('/private/diaries', { method: 'POST', body: { content: value } });
+        clearDraft('new');
         $('newContent').value = '';
         count('newContent', 'newCount');
         $('notice').textContent = `已创建 ${item.create_date} 的日记。`;
@@ -291,6 +366,7 @@
       $('editContent').readOnly = true;
       try {
         await request(`/private/diaries/${encodeURIComponent(editing.id)}`, { method: 'PATCH', body: { content: value }, version: editing.version });
+        clearDraft('edit');
         closeEditor();
         $('notice').textContent = '修改已保存。';
         loadList();
@@ -333,14 +409,15 @@
     $('conflict').hidden = true;
     $('latestPanel').hidden = true;
     $('editError').textContent = '已采用读取到的版本号；请检查草稿后保存。';
+    saveDraft('edit');
     syncButtons();
     $('editContent').focus();
   });
   $('cancelEdit').addEventListener('click', () => {
-    if (!busy && window.confirm('放弃这次编辑草稿？')) { closeEditor(); $('archiveTitle').focus(); }
+    if (!busy && window.confirm('放弃这次编辑草稿并清除对应本地草稿？') && clearDraft('edit')) { closeEditor(); $('archiveTitle').focus(); }
   });
-  $('newContent').addEventListener('input', () => count('newContent', 'newCount'));
-  $('editContent').addEventListener('input', () => count('editContent', 'editCount'));
+  $('newContent').addEventListener('input', () => { count('newContent', 'newCount'); saveDraft('new'); });
+  $('editContent').addEventListener('input', () => { count('editContent', 'editCount'); saveDraft('edit'); });
   $('startDate').addEventListener('change', () => {
     const start = $('startDate').value;
     if (!start) return;
@@ -382,14 +459,27 @@
   $('next').addEventListener('click', () => { if (!busy) { page += 1; loadList(); } });
   $('retryList').addEventListener('click', () => { if (!busy) loadList(); });
   window.addEventListener('beforeunload', (event) => {
-    if ($('newContent').value || editing) { event.preventDefault(); event.returnValue = ''; }
+    if (session && ($('newContent').value || editing)) { event.preventDefault(); event.returnValue = ''; }
   });
 
-  request('/session').then(signedIn).catch((error) => {
-    if (error.status === 401) {
-      redirectToLogin();
-      return;
-    }
-    $('notice').textContent = error.message || '无法检查会话，请刷新后重试。';
+  function checkSession() {
+    session = null;
+    invalidateList();
+    versionController?.abort();
+    $('workspace').hidden = true;
+    syncButtons();
+    request('/session').then(signedIn).catch((error) => {
+      if (error.status === 401) {
+        redirectToLogin();
+        return;
+      }
+      $('notice').textContent = error.message || '无法检查会话，请刷新后重试。';
+    });
+  }
+  // 返回缓存页时重新鉴权并读取存储；导航生命周期不回写旧快照。
+  window.addEventListener('pagehide', () => { $('workspace').hidden = true; });
+  window.addEventListener('pageshow', (event) => {
+    if (event.persisted) checkSession();
   });
+  checkSession();
 })();
